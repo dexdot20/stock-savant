@@ -1,6 +1,51 @@
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from services.ai.memory import RAGMemory
+
+
+class _FakeCacheManager:
+    def get_ttl_cache(self, **kwargs):
+        self.last_ttl_cache_kwargs = kwargs
+        return self
+
+    def get_many(self, namespace, keys):
+        return {}
+
+    def set_many(self, namespace, values):
+        return None
+
+
+class _FakeSentenceTransformer:
+    def __init__(self, model_name):
+        self.model_name = model_name
+
+    def encode(self, *args, **kwargs):
+        raise AssertionError("encode should not run during initialization")
+
+
+class _FakePersistentClient:
+    def __init__(self, path):
+        self.path = path
+        self.collections = []
+
+    def get_or_create_collection(self, name, embedding_function, metadata):
+        config = embedding_function.get_config()
+        rebuilt = embedding_function.build_from_config(config)
+        self.collections.append(
+            {
+                "name": name,
+                "embedding_name": embedding_function.name(),
+                "rebuilt_name": rebuilt.name(),
+                "legacy": embedding_function.is_legacy(),
+                "config": config,
+                "metadata": metadata,
+            }
+        )
+        return object()
 
 
 class _FakeReranker:
@@ -8,6 +53,52 @@ class _FakeReranker:
         self.last_query = query
         self.last_documents = list(documents)
         return [0.1, 0.9]
+
+
+class RAGMemoryEmbeddingProtocolTests(unittest.TestCase):
+    def test_rag_initialization_uses_embedding_protocol(self) -> None:
+        fake_config = {
+            "ai": {
+                "rag": {
+                    "enabled": True,
+                    "embedding_model": "intfloat/multilingual-e5-large",
+                    "normalize_embeddings": True,
+                    "top_k": 5,
+                    "candidate_pool": 18,
+                    "huggingface": {"suppress_model_load_report": True},
+                    "reranker": {"enabled": False},
+                    "query_expansion": {"enabled": False},
+                }
+            },
+            "cache": {"rag_embeddings": {"max_entries": 16, "ttl_seconds": 60}},
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fake_cache = _FakeCacheManager()
+            with (
+                patch("services.ai.memory.get_config", return_value=fake_config),
+                patch("services.ai.memory.get_runtime_dir", return_value=Path(temp_dir)),
+                patch("services.ai.memory.get_unified_cache", return_value=fake_cache),
+                patch("services.ai.memory.SentenceTransformer", _FakeSentenceTransformer),
+                patch(
+                    "services.ai.memory.chromadb",
+                    SimpleNamespace(PersistentClient=_FakePersistentClient),
+                ),
+            ):
+                rag = RAGMemory()
+
+        self.assertTrue(rag.is_ready())
+        self.assertEqual(len(rag._client.collections), 6)
+        self.assertTrue(
+            all(
+                item["embedding_name"] == "cached_sentence_transformer"
+                for item in rag._client.collections
+            )
+        )
+        self.assertTrue(
+            all(item["embedding_name"] == item["rebuilt_name"] for item in rag._client.collections)
+        )
+        self.assertTrue(all(item["legacy"] is False for item in rag._client.collections))
 
 
 class RAGMemoryChunkingTests(unittest.TestCase):

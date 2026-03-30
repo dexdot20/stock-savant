@@ -330,13 +330,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
         "models": {
             "news": {
-                "provider": "deepseek",
-                "model": "deepseek-chat",
+                "provider": "openrouter",
+                "model": "stepfun/step-3.5-flash",
                 "fallback_models": {
-                    "deepseek": ["deepseek-reasoner"],
                     "openrouter": [
-                        "openai/gpt-4o-mini",
-                        "anthropic/claude-3.5-sonnet",
+                        "openai/gpt-oss-120b",
                     ],
                 },
             },
@@ -344,43 +342,36 @@ DEFAULT_CONFIG: Dict[str, Any] = {
                 "provider": "deepseek",
                 "model": "deepseek-reasoner",
                 "fallback_models": {
-                    "deepseek": ["deepseek-chat"],
                     "openrouter": [
-                        "openai/gpt-4o-mini",
-                        "anthropic/claude-3.5-sonnet",
+                        "moonshotai/kimi-k2.5",
                     ],
                 },
             },
             "pre_research": {
-                "provider": "deepseek",
-                "model": "deepseek-chat",
+                "provider": "openrouter",
+                "model": "stepfun/step-3.5-flash",
                 "fallback_models": {
-                    "deepseek": ["deepseek-reasoner"],
                     "openrouter": [
-                        "openai/gpt-4o-mini",
-                        "anthropic/claude-3.5-sonnet",
+                        "openai/gpt-oss-120b",
                     ],
                 },
             },
             "comparison": {
                 "provider": "deepseek",
-                "model": "deepseek-chat",
+                "model": "deepseek-reasoner",
                 "fallback_models": {
-                    "deepseek": ["deepseek-reasoner"],
                     "openrouter": [
-                        "openai/gpt-4o-mini",
-                        "anthropic/claude-3.5-sonnet",
+                        "moonshotai/kimi-k2.5",
                     ],
                 },
             },
             "summarizer": {
-                "provider": "deepseek",
-                "model": "deepseek-chat",
+                "provider": "openrouter",
+                "model": "stepfun/step-3.5-flash:free",
                 "fallback_models": {
-                    "deepseek": ["deepseek-reasoner"],
                     "openrouter": [
-                        "openai/gpt-4o-mini",
-                        "anthropic/claude-3.5-sonnet",
+                        "nvidia/nemotron-3-super-120b-a12b:free",
+                        "mistralai/mistral-nemo",
                     ],
                 },
             },

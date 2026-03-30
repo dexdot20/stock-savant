@@ -149,16 +149,21 @@ class InteractiveCLI:
         """Pre-loads services at program startup to prevent initial usage delays."""
         try:
             with self.console.status(
-                "[dim]Services being prepared...[/dim]", spinner="dots"
-            ):
+                "[dim]Tool registry loading...[/dim]", spinner="dots"
+            ) as status:
                 from services.tools import get_tool
                 from services.factories import get_rag_service
 
                 # Warm up tool registry — all tools are initialized on first get_tool() call
                 get_tool("search_web")
+
+                status.update("[dim]Memory & RAG service loading...[/dim]")
                 rag = get_rag_service(self.config)
                 if hasattr(rag, "warmup"):
+                    status.update("[dim]RAG index warming up...[/dim]")
                     rag.warmup()
+
+                status.update("[dim]Ready.[/dim]")
             self.console.print("")
             logger.info("Service pre-loading completed.")
         except Exception as exc:

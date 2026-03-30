@@ -29,9 +29,17 @@ class _SuppressUnauthenticatedHFHubWarning(logging.Filter):
 try:
     import chromadb
     from chromadb import Documents
+    from chromadb.utils.embedding_functions import register_embedding_function
 except Exception:  # pragma: no cover - optional dependency
     chromadb = None
     Documents = list
+    def register_embedding_function(ef_class=None):  # type: ignore
+        if ef_class is None:
+            def _decorator(cls):
+                return cls
+
+            return _decorator
+        return ef_class
 
 try:
     from sentence_transformers import CrossEncoder, SentenceTransformer
@@ -54,6 +62,7 @@ class _StructuredChunk:
     content_type: str
 
 
+@register_embedding_function
 class CachedSentenceTransformerEmbeddingFunction:
     """SentenceTransformer wrapper with process-local TTL caching."""
 
@@ -78,6 +87,41 @@ class CachedSentenceTransformerEmbeddingFunction:
         self._query_prefix = str(query_prefix or "")
         self._cache_manager = get_unified_cache()
         self._model = SentenceTransformer(self._model_name)
+
+    @staticmethod
+    def name() -> str:
+        return "cached_sentence_transformer"
+
+    def get_config(self) -> Dict[str, Any]:
+        return {
+            "model_name": self._model_name,
+            "cache_namespace": self._cache_namespace,
+            "batch_size": self._batch_size,
+            "normalize_embeddings": self._normalize_embeddings,
+            "document_prefix": self._document_prefix,
+            "query_prefix": self._query_prefix,
+        }
+
+    @classmethod
+    def build_from_config(
+        cls,
+        config: Dict[str, Any],
+    ) -> "CachedSentenceTransformerEmbeddingFunction":
+        model_name = str(config.get("model_name") or "").strip()
+        if not model_name:
+            raise ValueError("CachedSentenceTransformerEmbeddingFunction requires model_name")
+
+        return cls(
+            model_name=model_name,
+            cache_namespace=str(config.get("cache_namespace") or "rag_embeddings").strip().lower(),
+            batch_size=max(1, _safe_int(config.get("batch_size", 32), 32)),
+            normalize_embeddings=bool(config.get("normalize_embeddings", True)),
+            document_prefix=str(config.get("document_prefix") or ""),
+            query_prefix=str(config.get("query_prefix") or ""),
+        )
+
+    def is_legacy(self) -> bool:
+        return False
 
     @staticmethod
     def _normalize_text(text: str) -> str:
