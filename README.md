@@ -1,6 +1,6 @@
-# Struct
+# Stock Savant
 
-Struct is a CLI and FastAPI toolset for stock analysis, financial data access, company comparison, and pre-research workflows.
+Stock Savant is a CLI and FastAPI toolkit for stock analysis, financial data access, company comparison, and pre-research workflows.
 
 ## Quick Start
 
@@ -29,7 +29,7 @@ pip install -r requirements.txt
 
 ## About
 
-`struct-savant` is an opinionated finance tooling framework:
+`stock-savant` is an opinionated finance tooling framework:
 
 - multi-source market data collection (yfinance adapter)
 - integrated AI-driven analysis and preset comparison flows

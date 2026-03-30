@@ -61,7 +61,9 @@ proxies.txt
 *.log
 
 # IDEs and notebooks
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 .idea/
 *.swp
 *.swo
