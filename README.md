@@ -26,3 +26,23 @@ pip install -r requirements.txt
 
 - See api/API_GUIDE.md for API endpoints and example requests.
 - The project is designed for both interactive use and automation.
+
+## About
+
+`struct-savant` is an opinionated finance tooling framework:
+
+- multi-source market data collection (yfinance adapter)
+- integrated AI-driven analysis and preset comparison flows
+- personal portfolio tracking and Kap membership insight integration
+- optional web API + CLI workflow modes
+
+## Contributing
+
+1. Fork the repository.
+2. Create a feature branch: `git checkout -b feature/your-improvement`.
+3. Add tests under `tests/` and run `pytest`.
+4. Open a pull request with a concise description and rationale.
+
+## License
+
+This project does not include a license file yet; add one (MIT, Apache-2.0, etc.) before downstream usage.
