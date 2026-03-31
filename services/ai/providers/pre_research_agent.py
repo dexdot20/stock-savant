@@ -562,11 +562,11 @@ class PreResearchAgent(ResearchAgentSupportMixin):
 
         if is_bist_market_context(self._current_exchange):
             user_message += (
-                "\n\nBIST guidance: use Turkish `search_web` queries first for discovery "
+                "\n\nBIST guidance: use English `search_web` queries first for discovery "
                 "and use KAP when official disclosures matter. Do not use `yfinance_search` "
                 "for broad screening; reserve it for a specific ticker such as `FROTO.IS` or "
-                "an index symbol such as `XU100.IS`. If a web search returns mostly English or "
-                "US-centric results, immediately retry in Turkish."
+                "an index symbol such as `XU100.IS`. If a web search returns mostly US-centric "
+                "results, refine the query with a BIST-specific ticker, company name, or index symbol."
             )
 
         if not loaded_state:

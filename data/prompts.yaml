@@ -218,8 +218,8 @@ _partials:
     - Prefer short, robust queries (roughly 2-6 tokens) for `search_news` and `search_web`.
     - Avoid long natural-language sentences in search tools.
     - Start broad, then refine with one extra keyword if needed.
-    - For Turkish market queries, prefer ticker/symbol + 1-2 context words (e.g., `THYAO.IS bilanço`, `BIST 100 bileşenler`).
-    - For BIST discovery, write search terms in Turkish first; if results are US- or English-centric, rerun the query in Turkish immediately.
+    - For Turkish market queries, prefer ticker/symbol + 1-2 context words (e.g., `THYAO.IS earnings`, `BIST 100 constituents`).
+    - For BIST discovery, use English search terms first; if results are too broad or US-centric, refine with a BIST-specific ticker, company name, or index symbol.
 
   shared_source_priority: |
     ## SOURCE PRIORITY
@@ -444,7 +444,7 @@ pre_research_agent: |
   - For Turkish stocks, use KAP when official disclosures are relevant to the screening decision.
   - KAP is optional; broad web/news or market-data exploration can come first if it better fits the task.
   - Use actual stock codes only (e.g. `THYAO` or `THYAO.IS`), not broad index phrases.
-  - For BIST broad discovery, do not start with `yfinance_search`. Use Turkish `search_web` and KAP first, and reserve `yfinance_search` for a specific ticker or index symbol.
+  - For BIST broad discovery, do not start with `yfinance_search`. Use English `search_web` and KAP first, and reserve `yfinance_search` for a specific ticker or index symbol.
 
   {{shared_parallel_execution_rules}}
 
@@ -490,7 +490,7 @@ pre_research_agent: |
   2. **Map the Opportunity Set**
      - Use `yfinance_search` and `yfinance_sector_analysis` to identify sectors, candidate companies, and likely tickers.
      - For BIST names, remember the `.IS` suffix when needed.
-     - For BIST broad discovery, prefer Turkish `search_web` and KAP first; use `yfinance_search` only for a specific ticker or index symbol.
+      - For BIST broad discovery, prefer English `search_web` and KAP first; use `yfinance_search` only for a specific ticker or index symbol.
      - If exchange-level sector analysis fails or returns only index context, pivot immediately to another discovery route instead of repeating the same call.
   3. **Verify Candidates (Modular First)**
      - Start with `yfinance_overview`, `yfinance_price_history`, `yfinance_analyst`, `yfinance_earnings`, `yfinance_dividends`, and other modular tools.
