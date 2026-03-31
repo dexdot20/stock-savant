@@ -19,12 +19,30 @@ class _FakeCacheManager:
         return None
 
 
+class _FakeEncodedBatch:
+    def __init__(self, values):
+        self._values = values
+
+    def tolist(self):
+        return self._values
+
+
 class _FakeSentenceTransformer:
+    instances = []
+
     def __init__(self, model_name):
         self.model_name = model_name
+        self.calls = []
+        self.__class__.instances.append(self)
 
-    def encode(self, *args, **kwargs):
-        raise AssertionError("encode should not run during initialization")
+    def encode(self, texts, **kwargs):
+        captured_texts = list(texts)
+        self.calls.append((captured_texts, kwargs))
+        vectors = [
+            [float(len(text)), float(len(text)) + 0.5]
+            for text in captured_texts
+        ]
+        return _FakeEncodedBatch(vectors)
 
 
 class _FakePersistentClient:
@@ -75,6 +93,7 @@ class RAGMemoryEmbeddingProtocolTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             fake_cache = _FakeCacheManager()
+            _FakeSentenceTransformer.instances = []
             with (
                 patch("services.ai.memory.get_config", return_value=fake_config),
                 patch("services.ai.memory.get_runtime_dir", return_value=Path(temp_dir)),
@@ -87,11 +106,17 @@ class RAGMemoryEmbeddingProtocolTests(unittest.TestCase):
             ):
                 rag = RAGMemory()
 
+        wrapper = rag._embedding_function
+        self.assertIsNotNone(wrapper)
+
+        document_vectors = wrapper.embed_documents(["Quarterly revenue outlook"])
+        query_vectors = wrapper.embed_query(["Quarterly revenue outlook"])
+
         self.assertTrue(rag.is_ready())
         self.assertEqual(len(rag._client.collections), 6)
         self.assertTrue(
             all(
-                item["embedding_name"] == "cached_sentence_transformer"
+                item["embedding_name"] == "sentence_transformer"
                 for item in rag._client.collections
             )
         )
@@ -99,6 +124,14 @@ class RAGMemoryEmbeddingProtocolTests(unittest.TestCase):
             all(item["embedding_name"] == item["rebuilt_name"] for item in rag._client.collections)
         )
         self.assertTrue(all(item["legacy"] is False for item in rag._client.collections))
+
+        model = _FakeSentenceTransformer.instances[0]
+        self.assertEqual(len(model.calls), 2)
+        self.assertTrue(model.calls[0][0][0].startswith("passage: "))
+        self.assertTrue(model.calls[1][0][0].startswith("query: "))
+        self.assertEqual(len(document_vectors), 1)
+        self.assertEqual(len(query_vectors), 1)
+        self.assertNotEqual(document_vectors, query_vectors)
 
 
 class RAGMemoryChunkingTests(unittest.TestCase):

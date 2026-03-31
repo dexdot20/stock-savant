@@ -90,7 +90,7 @@ class CachedSentenceTransformerEmbeddingFunction:
 
     @staticmethod
     def name() -> str:
-        return "cached_sentence_transformer"
+        return "sentence_transformer"
 
     def get_config(self) -> Dict[str, Any]:
         return {
@@ -144,6 +144,12 @@ class CachedSentenceTransformerEmbeddingFunction:
         payload = f"{self._model_name}|{kind}|{self._normalize_embeddings}|{text}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
+    @staticmethod
+    def _coerce_texts(input_texts: Any) -> List[str]:
+        if isinstance(input_texts, str):
+            return [input_texts]
+        return list(input_texts)
+
     def encode(self, texts: Sequence[str], *, kind: str) -> List[List[float]]:
         normalized_inputs = [self._prepare_text(text, kind) for text in texts]
         cache_keys = [self._cache_key(text, kind) if text else "" for text in normalized_inputs]
@@ -195,8 +201,14 @@ class CachedSentenceTransformerEmbeddingFunction:
 
         return [list(vector or []) for vector in resolved]
 
-    def __call__(self, input_texts: Documents) -> List[List[float]]:
-        return self.encode(list(input_texts), kind="document")
+    def __call__(self, input: Documents) -> List[List[float]]:
+        return self.embed_documents(input)
+
+    def embed_documents(self, input: Documents) -> List[List[float]]:
+        return self.encode(self._coerce_texts(input), kind="document")
+
+    def embed_query(self, input: Documents) -> List[List[float]]:
+        return self.encode(self._coerce_texts(input), kind="query")
 
 
 class _RAGCrossEncoderReranker:
