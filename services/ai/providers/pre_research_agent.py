@@ -551,17 +551,26 @@ class PreResearchAgent(ResearchAgentSupportMixin):
             )
 
         criteria_text = criteria.strip() if isinstance(criteria, str) else ""
-        user_message = (
-            f"Date: {today}\n"
-            f"Target Exchange: {exchange}\n"
-            f"Additional Criteria: {criteria_text or 'None'}\n"
-            f"{depth_instructions}\n\n"
+
+        # Build stable prefix for cache optimization:
+        # - Static system prompt (no dynamic content)
+        # - Stable first user message with only the task instruction
+        # - Dynamic content (date, exchange, criteria) in a FOLLOW-UP message
+        # This ensures cache hits on the prefix across requests
+        stable_user_prefix = (
             f"{self._build_tool_reliability_notice()}"
             "Start research, rank all suitable companies you find according to criteria."
         )
 
+        dynamic_context_message = (
+            f"Date: {today}\n"
+            f"Target Exchange: {exchange}\n"
+            f"Additional Criteria: {criteria_text or 'None'}\n"
+            f"{depth_instructions}"
+        )
+
         if is_bist_market_context(self._current_exchange):
-            user_message += (
+            dynamic_context_message += (
                 "\n\nBIST guidance: use English `search_web` queries first for discovery "
                 "and use KAP when official disclosures matter. Do not use `yfinance_search` "
                 "for broad screening; reserve it for a specific ticker such as `FROTO.IS` or "
@@ -572,7 +581,8 @@ class PreResearchAgent(ResearchAgentSupportMixin):
         if not loaded_state:
             history = [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
+                {"role": "user", "content": stable_user_prefix},
+                {"role": "user", "content": dynamic_context_message},
             ]
 
         total_non_memory_tools_executed = 0

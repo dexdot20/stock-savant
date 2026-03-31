@@ -20,6 +20,45 @@ from .cache_usage import extract_prompt_cache_usage, log_prompt_cache_usage
 from .native_tooling import ensure_tool_call_ids, finalize_stream_tool_calls, merge_stream_tool_calls
 
 
+def _inject_gemini_cache_control(payload: Dict[str, Any], cache_control: Dict[str, Any]) -> None:
+    """
+    Inject cache_control into the last message content block for Gemini models.
+
+    Gemini on OpenRouter requires cache_control to be inside message content blocks,
+    not at the top level. Only the last cache_control breakpoint is used.
+
+    Per OpenRouter docs: "OpenRouter will use only the last breakpoint for Gemini caching.
+    Including multiple breakpoints is safe and can help maintain compatibility with Anthropic,
+    but only the final one will be used for Gemini."
+    """
+    messages = payload.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return
+
+    # Find the last message with content
+    for msg in reversed(messages):
+        content = msg.get("content")
+        if not content:
+            continue
+
+        # If content is a string, convert to list format and add cache_control
+        if isinstance(content, str):
+            msg["content"] = [
+                {"type": "text", "text": content, "cache_control": cache_control}
+            ]
+        # If content is already a list, add cache_control to the last text block
+        elif isinstance(content, list):
+            # Find the last text block
+            for block in reversed(content):
+                if isinstance(block, dict) and block.get("type") == "text":
+                    block["cache_control"] = cache_control
+                    break
+            else:
+                # No text block found, append one with cache_control
+                content.append({"type": "text", "text": "", "cache_control": cache_control})
+        break
+
+
 @dataclass
 class _StreamState:
     on_reasoning_delta: Optional[Callable[[str], None]] = None
@@ -521,8 +560,22 @@ def _prepare_openrouter_payload(
     cache_control = kwargs.get("cache_control")
     if cache_control is None:
         cache_control = prompt_caching_cfg.get("cache_control")
+
+    # Apply cache_control based on model type for optimal cache hits
     if prompt_caching_enabled and isinstance(cache_control, dict) and cache_control:
-        payload["cache_control"] = cache_control
+        model_lower = model.lower()
+
+        # Gemini models on OpenRouter: cache_control must be inside message content blocks
+        # Only the last cache_control breakpoint is used for Gemini
+        if "gemini" in model_lower or "google" in model_lower:
+            _inject_gemini_cache_control(payload, cache_control)
+        # Anthropic models: support top-level cache_control (automatic caching)
+        # Also works for models with automatic caching via sticky routing
+        elif "anthropic" in model_lower or "claude" in model_lower:
+            payload["cache_control"] = cache_control
+        # For other models, use top-level cache_control (OpenRouter handles provider-specific translation)
+        else:
+            payload["cache_control"] = cache_control
 
     provider_preferences = kwargs.get("provider")
     if not isinstance(provider_preferences, dict):

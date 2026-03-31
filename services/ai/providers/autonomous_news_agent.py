@@ -1153,22 +1153,30 @@ class AutonomousNewsAgent:
                 depth_instructions = "\n\n**DEEP RESEARCH MODE ACTIVE:** Previous analysis was deemed insufficient. You MUST:\n- Consult at least 5 different sources\n- Verify key claims with independent evidence using available tools\n- Actively search for contradicting viewpoints\n- Update working memory after each discovery\n- Do NOT finish until research_depth_score >= 5"
 
             # Initial user input with context
+            # Cache optimization: separate stable prefix from dynamic content
             company_context_str = json.dumps(
                 company_payload, default=str, ensure_ascii=False
             )
-            user_message = (
+
+            # Stable prefix for cache hits - static instruction that doesn't change
+            stable_user_prefix = (
+                f"{self._build_tool_reliability_notice()}"
+                "\n\nBegin your research using the available tools and the provided context."
+            )
+
+            # Dynamic context in separate message - varies per request
+            dynamic_context_message = (
                 f"Date: {today}\n"
                 f"Target: {company_name}\n"
                 f"Context: {company_context_str}\n"
                 f"{news_summary}"
                 f"{depth_instructions}"
-                f"{self._build_tool_reliability_notice()}"
-                "\n\nBegin your research using the available tools and the provided context."
             )
 
             history = [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
+                {"role": "user", "content": stable_user_prefix},
+                {"role": "user", "content": dynamic_context_message},
             ]
 
             step = 0

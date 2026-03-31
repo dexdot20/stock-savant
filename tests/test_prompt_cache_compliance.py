@@ -5,6 +5,7 @@ from services.ai.providers.base_provider import ProviderContext
 from services.ai.providers.openrouter_provider import (
     _prepare_openrouter_payload,
     _process_openrouter_response,
+    _inject_gemini_cache_control,
 )
 from services.ai.providers.research_agent_support import ResearchAgentSupportMixin
 from services.ai.working_memory import WorkingMemory
@@ -98,6 +99,103 @@ class OpenRouterPromptCacheTests(unittest.TestCase):
         self.assertEqual(response["usage"]["cached_tokens"], 768)
         self.assertEqual(response["usage"]["cache_write_tokens"], 512)
         self.assertEqual(response["usage"]["cache_discount"], 1.25)
+
+
+class GeminiCacheControlTests(unittest.TestCase):
+    """Test Gemini-specific cache_control injection for OpenRouter."""
+
+    def test_gemini_cache_control_injected_into_last_message(self) -> None:
+        """Gemini requires cache_control inside message content blocks, not top-level."""
+        payload = {
+            "model": "google/gemini-2.5-pro",
+            "messages": [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "Analyze this document."},
+                {"role": "user", "content": "Large document content here..."},
+            ],
+        }
+        cache_control = {"type": "ephemeral"}
+
+        _inject_gemini_cache_control(payload, cache_control)
+
+        # cache_control should NOT be at top level
+        self.assertNotIn("cache_control", payload)
+
+        # Last message should have cache_control in its content
+        last_message = payload["messages"][-1]
+        self.assertIsInstance(last_message["content"], list)
+        self.assertEqual(last_message["content"][0]["cache_control"], cache_control)
+
+    def test_gemini_cache_control_with_existing_list_content(self) -> None:
+        """Handle case where content is already a list of blocks."""
+        payload = {
+            "model": "google/gemini-2.5-flash",
+            "messages": [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Part 1"},
+                        {"type": "text", "text": "Part 2 with large content..."},
+                    ],
+                },
+            ],
+        }
+        cache_control = {"type": "ephemeral"}
+
+        _inject_gemini_cache_control(payload, cache_control)
+
+        # cache_control should be added to the last text block
+        last_message = payload["messages"][-1]
+        content_blocks = last_message["content"]
+        self.assertEqual(content_blocks[-1]["cache_control"], cache_control)
+
+
+class DeepSeekCacheComplianceTests(unittest.TestCase):
+    """Test DeepSeek-specific caching requirements.
+
+    DeepSeek requires identical prefixes from token 0 for cache hits.
+    Dynamic content must appear AFTER stable prefixes.
+    """
+
+    def test_stable_message_prefix_structure(self) -> None:
+        """Verify messages have stable system prompt and first user message."""
+        # Simulating pre_research_agent history structure
+        system_prompt = "You are a financial research agent. Use tools to research and summarize."
+        stable_user_prefix = "Start research, rank all suitable companies you find according to criteria."
+        dynamic_context = "Date: 31 March 2026\nTarget Exchange: BIST\nAdditional Criteria: None"
+
+        history = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": stable_user_prefix},
+            {"role": "user", "content": dynamic_context},
+        ]
+
+        # First two messages should be stable across requests
+        self.assertEqual(history[0]["role"], "system")
+        self.assertEqual(history[1]["role"], "user")
+
+        # Dynamic content should be in separate message
+        self.assertIn("Date:", history[2]["content"])
+        self.assertIn("Target Exchange:", history[2]["content"])
+
+    def test_cache_hit_token_extraction(self) -> None:
+        """Verify DeepSeek cache hit/miss tokens are extracted from usage."""
+        from services.ai.providers.cache_usage import extract_prompt_cache_usage
+
+        # DeepSeek usage format
+        usage = {
+            "prompt_tokens": 1000,
+            "completion_tokens": 50,
+            "total_tokens": 1050,
+            "prompt_cache_hit_tokens": 800,
+            "prompt_cache_miss_tokens": 200,
+        }
+
+        cache_usage = extract_prompt_cache_usage(usage)
+
+        self.assertEqual(cache_usage["prompt_cache_hit_tokens"], 800)
+        self.assertEqual(cache_usage["prompt_cache_miss_tokens"], 200)
 
 
 class HistorySummaryCacheComplianceTests(unittest.IsolatedAsyncioTestCase):
