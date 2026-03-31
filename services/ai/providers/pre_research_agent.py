@@ -554,8 +554,6 @@ class PreResearchAgent(ResearchAgentSupportMixin):
             f"Target Exchange: {exchange}\n"
             f"Additional Criteria: {criteria_text or 'None'}\n"
             f"{depth_instructions}\n\n"
-            "**Working Memory Protocol:** Use update_working_memory after meaningful, source-backed findings. "
-            "Store verified facts only; keep hypotheses and tentative interpretations out of `new_facts`.\n\n"
             f"{self._build_tool_reliability_notice()}"
             "Start research, rank all suitable companies you find according to criteria."
         )

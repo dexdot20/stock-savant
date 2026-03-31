@@ -13,7 +13,12 @@ def _build_tooling_directive(config: Dict[str, Any]) -> str:
     python_cfg = ai_cfg.get("python_exec", {}) if isinstance(ai_cfg, dict) else {}
     report_cfg = ai_cfg.get("report_tool", {}) if isinstance(ai_cfg, dict) else {}
 
-    lines = [_TOOLING_DIRECTIVE_MARKER]
+    lines = [
+        _TOOLING_DIRECTIVE_MARKER,
+        "- Tool availability is request-scoped. Use only tools exposed in the current request and follow their exact argument names.",
+        "- If native tool calling is available, call tools natively instead of printing JSON, XML, or pseudo-tool syntax in the message body.",
+        "- Treat tool outputs as authoritative runtime evidence. If a tool fails or returns empty data, say so and adapt instead of inventing results.",
+    ]
 
     if bool(python_cfg.get("enabled", True)):
         lines.append(
@@ -26,10 +31,6 @@ def _build_tooling_directive(config: Dict[str, Any]) -> str:
             "- `report(title, category, severity, summary, details?, suggested_fix?, context?, fingerprint?)`: use this to record developer-facing technical issues, risks, or optimization ideas in a redacted JSONL report log. "
             "This tool is always available, but use it only for actionable engineering feedback and avoid duplicate or noisy reports. Never include secrets or raw sensitive data."
         )
-
-    lines.append(
-        "- If the current interaction supports tool calls, invoke these tools with the standard tool-call format. If tool calls are not available in the current internal helper request, do not invent tool syntax."
-    )
     return "\n".join(lines)
 
 

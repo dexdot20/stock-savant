@@ -552,8 +552,6 @@ class ComparisonAgent(ResearchAgentSupportMixin):
             f"{depth_instructions}\n\n"
             "Current Financial Summary (JSON):\n"
             f"{data_blob}\n\n"
-            "Working Memory Protocol: use update_working_memory only after meaningful, source-backed findings or a small related batch.\n"
-            "Put unverified interpretations into questions or research milestones instead of new_facts.\n"
             f"{self._build_tool_reliability_notice()}"
             "Start the comparison and present the differences in a clear report."
         )

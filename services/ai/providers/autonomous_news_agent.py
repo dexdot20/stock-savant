@@ -1150,7 +1150,7 @@ class AutonomousNewsAgent:
             # Depth mode instructions
             depth_instructions = ""
             if depth_mode == "deep":
-                depth_instructions = "\n\n**DEEP RESEARCH MODE ACTIVE:** Previous analysis was deemed insufficient. You MUST:\n- Consult at least 5 different sources\n- Verify key claims with fact_checker\n- Actively search for contradicting viewpoints\n- Update working memory after each discovery\n- Do NOT finish until research_depth_score >= 5"
+                depth_instructions = "\n\n**DEEP RESEARCH MODE ACTIVE:** Previous analysis was deemed insufficient. You MUST:\n- Consult at least 5 different sources\n- Verify key claims with independent evidence using available tools\n- Actively search for contradicting viewpoints\n- Update working memory after each discovery\n- Do NOT finish until research_depth_score >= 5"
 
             # Initial user input with context
             company_context_str = json.dumps(
@@ -1162,11 +1162,8 @@ class AutonomousNewsAgent:
                 f"Context: {company_context_str}\n"
                 f"{news_summary}"
                 f"{depth_instructions}"
-                "\n\n**Working Memory Protocol:** Use `update_working_memory` after meaningful, source-backed results or a small related batch. Save only verified facts in `new_facts`; keep tentative interpretations in questions or milestones. When filling `contradictions`, actively compare the new data against facts already in memory — if any number, claim, or date conflicts with a previously saved fact, record it explicitly as 'Source A says X, but Source B says Y'."
-                "\n\n**Mandatory First Action:** You MUST call `search_memory` within your first 2 steps to load prior indexed context before broad web/news exploration."
-                "\n\n**Parallel Execution:** You can call MULTIPLE tools in a single response simultaneously. Always batch independent operations — run searches together, fetch multiple URLs at once. Sequential calls when parallel is possible waste steps and budget."
                 f"{self._build_tool_reliability_notice()}"
-                "\n\nBegin your research using the provided tools."
+                "\n\nBegin your research using the available tools and the provided context."
             )
 
             history = [

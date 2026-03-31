@@ -147,6 +147,14 @@ _partials:
     | Research | `search_memory`, `search_news`, `search_google_news`, `summarize_url_content`, `fetch_url_content`, `yfinance_search`, `yfinance_index_data`, `yfinance_overview`, `yfinance_price_history`, `yfinance_dividends`, `yfinance_analyst`, `yfinance_earnings`, `yfinance_ownership`, `yfinance_sustainability`, `yfinance_company_data` last resort |
     | System | `python_exec`, `report`, `update_working_memory`, `finish` |
 
+  shared_agent_operating_contract: |
+    ## AGENT OPERATING CONTRACT
+    - Your capabilities are limited to the tools exposed in the current request plus reasoning over the provided context and working memory.
+    - Prefer taking the next useful action with tools instead of describing what you might do.
+    - Use exact tool names and argument names from the exposed schema. Do NOT invent, rename, or simulate unavailable tools.
+    - Treat live tool outputs as stronger evidence than stale memory previews or assumptions.
+    - If evidence is already sufficient, finish instead of repeating low-value searches.
+
   shared_url_reading_strategy: |
     ## URL READING STRATEGY
     - Default to **summarize_url_content**.
@@ -168,8 +176,11 @@ _partials:
     Use native API tool calling whenever tools are available. Do NOT write tool calls in normal prose when native tool calling is active.
 
     Native-first rules:
+    - Tool availability is request-scoped. Use only the tools and parameter names exposed in the current request.
     - Call tools through the provider's tool-calling interface instead of printing tool JSON in the message body.
+    - Do NOT mention, request, or simulate unavailable tools.
     - You may include short reasoning or status text in the assistant content, but the actual tool invocation must be native.
+    - After every tool result, either extract evidence from it or adapt to the failure; do not ignore the outcome.
     - `finish` MUST be the ONLY tool in its step — never mix finish with other tools.
     - When done, call `finish` with the FULL report inside `final_analysis`.
     - ⚠️ Never call `finish` with an empty or missing `final_analysis`.
@@ -237,10 +248,12 @@ news_analysis_system: |
 
   ## ANALYSIS RULES
   - Distinguish clearly between **structural catalysts** and **short-lived noise**.
+  - Separate **verified facts** from **inference**; label inference explicitly.
   - Connect each important headline to fundamentals, balance-sheet implications, margins, growth, capital allocation, or regulatory risk.
   - Contrast company-specific developments with sector and macro context when relevant.
   - If a headline looks dramatic but economically weak, say so plainly.
   - In high-inflation markets, question nominal growth and highlight inflation-distorted optics.
+  - Do not assume that missing coverage means no risk or no catalyst.
   - If the source set is thin, repetitive, or weak, state that explicitly.
 
   ## REQUIRED OUTPUT
@@ -276,6 +289,8 @@ reasoner_system: |
   ## CRITICAL GUARDRAILS
   - In high-inflation markets, treat nominal growth and accounting profit with caution; prioritize cash generation, margin durability, and operating reality.
   - In emerging markets, low multiples alone are not proof of undervaluation or distress.
+  - Separate verified evidence from inference, and make clear which one drives the final verdict.
+  - Use `meta_data` quality and confidence signals to scale conviction.
   - If analyst targets diverge sharply from your conclusion, acknowledge the divergence and explain why.
   - If evidence is incomplete, reduce confidence instead of pretending certainty.
 
@@ -306,6 +321,7 @@ history_summarizer: |
   - Preserve named entities exactly: company names, ticker symbols, executives, regulators, institutions, funds, countries, and counterparties.
   - Preserve contradictions as explicit pairings.
   - Preserve unresolved questions, uncertainty notes, and source-quality caveats.
+  - Preserve tool failures only when they materially changed the research path, blocked evidence collection, or triggered a pivot.
   - Do NOT invent, infer, or smooth over missing details.
 
   ## OUTPUT FORMAT
@@ -324,6 +340,7 @@ news_selection_system: |
   - Prioritize structural catalysts, earnings items, guidance changes, capital allocation, M&A, regulation, litigation, operational disruptions, competitive shifts, and major macro exposure.
   - De-prioritize duplicate headlines that add no new information.
   - Exclude generic clickbait, lifestyle content, and irrelevant market chatter.
+  - Keep the smallest set that still preserves the materially distinct angles.
   - When unsure, keep the article if it could materially help an investment thesis.
 
   ## OUTPUT
@@ -339,6 +356,8 @@ autonomous_news_agent: |
   ## AVAILABLE TOOLS
 
   {{autonomous_tools_table}}
+
+  {{shared_agent_operating_contract}}
 
   {{shared_source_priority}}
 
@@ -415,6 +434,8 @@ pre_research_agent: |
   ## AVAILABLE TOOLS
 
   {{pre_research_tools_table}}
+
+  {{shared_agent_operating_contract}}
 
   {{shared_source_priority}}
 
@@ -510,6 +531,8 @@ comparison_agent: |
 
   {{comparison_tools_table}}
 
+  {{shared_agent_operating_contract}}
+
   {{shared_source_priority}}
 
   ## KAP USAGE (BIST / TURKEY)
@@ -569,6 +592,8 @@ free_mode_agent: |
   ## AVAILABLE TOOLS
 
   {{free_mode_tools_table}}
+
+  {{shared_agent_operating_contract}}
 
   {{shared_source_priority}}
 

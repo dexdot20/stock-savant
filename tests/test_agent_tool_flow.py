@@ -28,6 +28,7 @@ from services.ai.providers.openrouter_provider import (
 from services.ai.providers.base_provider import ProviderContext
 from services.ai.providers.pre_research_agent import PreResearchAgent
 from services.ai.providers.prompt_store import PromptStore
+from services.ai.providers.system_prompt_utils import augment_system_prompt
 from services.ai.providers.tool_call_parser import (
     content_has_tool_call_markup,
     normalize_tool_calls,
@@ -78,6 +79,28 @@ class PromptStoreAgentLimitTests(unittest.TestCase):
         self.assertIn("does NOT consume a parallel external-tool slot", prompt)
         self.assertIn("treat that source fetch as failed", prompt)
         self.assertIn("Do NOT write failed fetch attempts", prompt)
+        self.assertIn("Use exact tool names and argument names", prompt)
+        self.assertIn("Do NOT invent, rename, or simulate unavailable tools", prompt)
+
+
+class SystemPromptAugmentationTests(unittest.TestCase):
+    def test_augment_system_prompt_adds_runtime_capability_guidance(self) -> None:
+        prompt = augment_system_prompt(
+            "Base prompt.",
+            config={
+                "ai": {
+                    "python_exec": {"enabled": True},
+                    "report_tool": {"enabled": True},
+                }
+            },
+            output_language="English",
+        )
+
+        self.assertIn("Tool availability is request-scoped", prompt)
+        self.assertIn("call tools natively instead of printing JSON", prompt)
+        self.assertIn("If a tool fails or returns empty data", prompt)
+        self.assertIn("python_exec(code, input_data?, timeout_seconds?)", prompt)
+        self.assertIn("report(title, category, severity, summary", prompt)
 
 
 class AgentGuardrailNormalizationTests(unittest.TestCase):
