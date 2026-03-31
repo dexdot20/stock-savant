@@ -19,6 +19,18 @@ _XML_BLOCK_RE = re.compile(
     r"<tool_calls>\s*(.*?)\s*</tool_calls>",
     re.IGNORECASE | re.DOTALL,
 )
+_LEGACY_TOOL_CALL_RE = re.compile(
+    r"<tool_call>\s*(.*?)\s*</tool_call>",
+    re.IGNORECASE | re.DOTALL,
+)
+_LEGACY_FUNCTION_RE = re.compile(
+    r"<function(?:\s*=\s*|\s+name\s*=\s*[\"']?)(?P<name>[A-Za-z_][A-Za-z0-9_]*)[\"']?\s*>(?P<body>.*?)</function>",
+    re.IGNORECASE | re.DOTALL,
+)
+_LEGACY_PARAMETER_RE = re.compile(
+    r"<parameter(?:\s*=\s*|\s+name\s*=\s*[\"']?)(?P<name>[A-Za-z_][A-Za-z0-9_]*)[\"']?\s*>(?P<value>.*?)</parameter>",
+    re.IGNORECASE | re.DOTALL,
+)
 # Low-priority fallback: any generic ``` block
 _ANY_FENCE_RE = re.compile(r"```\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
 # Function-call style: tool_name({"key": "value"})
@@ -286,6 +298,76 @@ def _parse_tool_call_array(raw_block: str) -> List[Dict[str, Any]]:
     return []
 
 
+def _parse_legacy_parameter_value(raw_value: str) -> Any:
+    value = str(raw_value or "").strip()
+    if not value:
+        return ""
+
+    lowered = value.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if lowered in {"null", "none"}:
+        return None
+
+    if re.fullmatch(r"-?\d+", value):
+        try:
+            return int(value)
+        except ValueError:
+            return value
+
+    if re.fullmatch(r"-?(?:\d+\.\d*|\.\d+)", value):
+        try:
+            return float(value)
+        except ValueError:
+            return value
+
+    if value[0] in {'[', '{', '"'}:
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+
+    return value
+
+
+def _parse_legacy_tool_call_markup(content: str) -> Tuple[List[Dict[str, Any]], str]:
+    tool_calls: List[Dict[str, Any]] = []
+    spans: List[Tuple[int, int]] = []
+    for match in _LEGACY_TOOL_CALL_RE.finditer(content):
+        function_match = _LEGACY_FUNCTION_RE.search(match.group(1))
+        if not function_match:
+            continue
+
+        args: Dict[str, Any] = {}
+        for param_match in _LEGACY_PARAMETER_RE.finditer(function_match.group("body")):
+            args[param_match.group("name").strip()] = _parse_legacy_parameter_value(
+                param_match.group("value")
+            )
+
+        tool_calls.append(
+            {
+                "name": function_match.group("name").strip(),
+                "args": args,
+            }
+        )
+        spans.append((match.start(), match.end()))
+
+    if not tool_calls:
+        return [], content.strip()
+
+    cleaned_parts: List[str] = []
+    last_idx = 0
+    for start, end in spans:
+        cleaned_parts.append(content[last_idx:start])
+        last_idx = end
+    cleaned_parts.append(content[last_idx:])
+    cleaned = " ".join(part.strip() for part in cleaned_parts if part.strip()).strip()
+    cleaned = re.sub(r"(?:\s*,\s*)+", " ", cleaned).strip(" ,\n\t")
+    return tool_calls, cleaned
+
+
 # ── Function-call style parser ────────────────────────────────────────────────
 
 def _find_balanced_segment(text: str, start_idx: int, opener: str, closer: str) -> int:
@@ -349,6 +431,16 @@ def _parse_function_style_tool_calls(content: str) -> Tuple[List[Dict[str, Any]]
     return tool_calls, cleaned
 
 
+def content_has_tool_call_markup(content: Any) -> bool:
+    if not isinstance(content, str) or not content.strip():
+        return False
+    return bool(
+        _JSON_FENCE_RE.search(content)
+        or _XML_BLOCK_RE.search(content)
+        or _LEGACY_TOOL_CALL_RE.search(content)
+    )
+
+
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def parse_tool_calls_from_content(content: Any) -> Tuple[List[Dict[str, Any]], str]:
@@ -358,9 +450,10 @@ def parse_tool_calls_from_content(content: Any) -> Tuple[List[Dict[str, Any]], s
     Priority order:
       1. ```json or ```tool_calls fenced block  (primary — new format)
       2. <tool_calls>...</tool_calls> XML block  (backward compat)
-      3. Generic ``` fenced block
-      4. Bare JSON array at top level
-      5. Function-call style: name({...})
+            3. <tool_call><function=...>...</tool_call> legacy markup
+            4. Generic ``` fenced block
+            5. Bare JSON array at top level
+            6. Function-call style: name({...})
     """
     if not isinstance(content, str):
         return [], ""
@@ -399,19 +492,24 @@ def parse_tool_calls_from_content(content: Any) -> Tuple[List[Dict[str, Any]], s
         cleaned = _XML_BLOCK_RE.sub("", content).strip()
         return [], cleaned
 
-    # ── 3. Generic ``` block ──────────────────────────────────────────────────
+    # ── 3. Legacy singular tool-call markup ──────────────────────────────────
+    calls, cleaned = _parse_legacy_tool_call_markup(content)
+    if calls:
+        return calls, cleaned
+
+    # ── 4. Generic ``` block ──────────────────────────────────────────────────
     for match in _ANY_FENCE_RE.finditer(content):
         calls = _parse_tool_call_array(match.group(1))
         if calls:
             cleaned = _ANY_FENCE_RE.sub("", content, count=1).strip()
             return calls, cleaned
 
-    # ── 4. Bare JSON array ────────────────────────────────────────────────────
+    # ── 5. Bare JSON array ────────────────────────────────────────────────────
     stripped = content.strip()
     if stripped.startswith("["):
         calls = _parse_tool_call_array(stripped)
         if calls:
             return calls, ""
 
-    # ── 5. Function-call style ────────────────────────────────────────────────
+    # ── 6. Function-call style ────────────────────────────────────────────────
     return _parse_function_style_tool_calls(content)

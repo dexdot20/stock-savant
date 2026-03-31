@@ -28,6 +28,7 @@ from services.ai.providers.agent_session_utils import (
 )
 from services.ai.providers.system_prompt_utils import augment_system_prompt
 from services.ai.providers.tool_call_parser import (
+    content_has_tool_call_markup,
     normalize_tool_calls,
     parse_tool_calls_from_content,
 )
@@ -719,7 +720,7 @@ class PreResearchAgent(ResearchAgentSupportMixin):
                     }
 
                 # Model may have written tool call as plain text or with malformed JSON. Inject corrector.
-                has_block = "```json" in raw_content or "```tool_calls" in raw_content or "<tool_calls>" in raw_content.lower()
+                has_block = content_has_tool_call_markup(raw_content)
                 consecutive_no_tool_calls += 1
                 self.logger.warning(
                     "Agent responded without valid tool call block (%s, content=%d chars). Injecting correction (attempt %d).",

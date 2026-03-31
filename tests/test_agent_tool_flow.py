@@ -15,10 +15,18 @@ from services.ai.providers.deepseek_provider import (
     _ConsoleStreamRenderer,
     _process_deepseek_response,
 )
-from services.ai.providers.openrouter_provider import _process_openrouter_response
+from services.ai.providers.openrouter_provider import (
+    _emit_stream_delta as _emit_openrouter_stream_delta,
+    _process_openrouter_response,
+    _resolve_stream_state as _resolve_openrouter_stream_state,
+)
 from services.ai.providers.base_provider import ProviderContext
 from services.ai.providers.pre_research_agent import PreResearchAgent
 from services.ai.providers.prompt_store import PromptStore
+from services.ai.providers.tool_call_parser import (
+    content_has_tool_call_markup,
+    parse_tool_calls_from_content,
+)
 
 
 class AgentToolPlanPreviewTests(unittest.TestCase):
@@ -150,6 +158,48 @@ class AgentGuardrailNormalizationTests(unittest.TestCase):
         self.assertIn("Screening drift detected", notice)
 
 
+class ToolCallParserCompatibilityTests(unittest.TestCase):
+    def test_parse_legacy_tool_call_markup(self) -> None:
+        content = (
+            "I'll help you check prior context.\n"
+            "<tool_call><function=search_memory>"
+            "<parameter=query>BIST stocks relative low safe dividend</parameter>"
+            "<parameter=detail_level>standard</parameter>"
+            "</function></tool_call>"
+        )
+
+        tool_calls, cleaned = parse_tool_calls_from_content(content)
+
+        self.assertEqual(
+            tool_calls,
+            [
+                {
+                    "name": "search_memory",
+                    "args": {
+                        "query": "BIST stocks relative low safe dividend",
+                        "detail_level": "standard",
+                    },
+                }
+            ],
+        )
+        self.assertEqual(cleaned, "I'll help you check prior context.")
+        self.assertTrue(content_has_tool_call_markup(content))
+
+    def test_parse_legacy_tool_call_markup_coerces_scalars(self) -> None:
+        content = (
+            "<tool_call><function=yfinance_search>"
+            "<parameter=max_results>10</parameter>"
+            "<parameter=include_etfs>false</parameter>"
+            "</function></tool_call>"
+        )
+
+        tool_calls, cleaned = parse_tool_calls_from_content(content)
+
+        self.assertEqual(tool_calls[0]["args"]["max_results"], 10)
+        self.assertFalse(tool_calls[0]["args"]["include_etfs"])
+        self.assertEqual(cleaned, "")
+
+
 class ReasoningUxTests(unittest.TestCase):
     def test_deepseek_response_preserves_streaming_metadata(self) -> None:
         context = ProviderContext(
@@ -272,6 +322,29 @@ class ReasoningUxTests(unittest.TestCase):
         self.assertIn("Answer", output)
         self.assertNotIn("[thinking]", output)
         self.assertNotIn("[answer]", output)
+
+    def test_openrouter_stream_preserves_leading_spaces_between_deltas(self) -> None:
+        stream = StringIO()
+        console = Console(file=stream, force_terminal=False, color_system=None)
+        stream_state = _resolve_openrouter_stream_state(
+            "pre_research",
+            "stepfun/step-3.5-flash",
+            console=console,
+        )
+
+        _emit_openrouter_stream_delta(stream_state, {"reasoning": "The"})
+        _emit_openrouter_stream_delta(stream_state, {"reasoning": " user"})
+        _emit_openrouter_stream_delta(stream_state, {"reasoning": " wants"})
+        _emit_openrouter_stream_delta(stream_state, {"content": "I'll"})
+        _emit_openrouter_stream_delta(stream_state, {"content": " help"})
+        if stream_state.finalizer:
+            stream_state.finalizer()
+
+        output = stream.getvalue()
+        self.assertIn("The user wants", output)
+        self.assertIn("I'll help", output)
+        self.assertNotIn("Theuserwants", output)
+        self.assertNotIn("I'llhelp", output)
 
     def test_pre_research_reflection_skips_reasoning_panel_when_streamed(self) -> None:
         agent = PreResearchAgent.__new__(PreResearchAgent)

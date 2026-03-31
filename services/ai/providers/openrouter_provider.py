@@ -159,31 +159,85 @@ def _stringify_openrouter_value(value: Any) -> str:
     return str(value).strip()
 
 
-def _reasoning_details_to_text(details: Any) -> str:
+def _stringify_openrouter_stream_value(value: Any) -> str:
+    if value is None:
+        return ""
+
+    if isinstance(value, str):
+        return value
+
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+
+    if isinstance(value, dict):
+        preferred_keys = (
+            "text",
+            "summary",
+            "content",
+            "value",
+            "message",
+            "output_text",
+            "reasoning",
+            "reasoning_content",
+            "refusal",
+            "arguments",
+            "data",
+        )
+        parts: List[str] = []
+        for key in preferred_keys:
+            if key in value:
+                text = _stringify_openrouter_stream_value(value.get(key))
+                if text:
+                    parts.append(text)
+        if parts:
+            return "".join(parts)
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return str(value)
+
+    if isinstance(value, list):
+        parts = [_stringify_openrouter_stream_value(item) for item in value]
+        return "".join(part for part in parts if part)
+
+    return str(value)
+
+
+def _reasoning_details_to_text(details: Any, *, preserve_spacing: bool = False) -> str:
     if not isinstance(details, list):
         return ""
 
+    stringify = (
+        _stringify_openrouter_stream_value
+        if preserve_spacing
+        else _stringify_openrouter_value
+    )
     parts: List[str] = []
     for item in details:
         if not isinstance(item, dict):
             continue
         detail_type = str(item.get("type") or "").strip().lower()
         if detail_type == "reasoning.text":
-            text = _stringify_openrouter_value(item.get("text"))
+            text = stringify(item.get("text"))
         elif detail_type == "reasoning.summary":
-            text = _stringify_openrouter_value(item.get("summary"))
+            text = stringify(item.get("summary"))
         else:
             text = ""
         if text:
             parts.append(text)
+    if preserve_spacing:
+        return "".join(parts)
     return "\n".join(parts).strip()
 
 
 def _emit_stream_delta(stream_state: _StreamState, delta: Dict[str, Any]) -> None:
-    content_delta = _stringify_openrouter_value(delta.get("content"))
-    reasoning_delta = _stringify_openrouter_value(delta.get("reasoning"))
+    content_delta = _stringify_openrouter_stream_value(delta.get("content"))
+    reasoning_delta = _stringify_openrouter_stream_value(delta.get("reasoning"))
     if not reasoning_delta:
-        reasoning_delta = _reasoning_details_to_text(delta.get("reasoning_details"))
+        reasoning_delta = _reasoning_details_to_text(
+            delta.get("reasoning_details"),
+            preserve_spacing=True,
+        )
 
     if reasoning_delta:
         stream_state.reasoning_streamed = True
@@ -261,15 +315,16 @@ async def _post_openrouter_stream_request_async(
                     finish_reason = choice.get("finish_reason") or finish_reason
                     delta = choice.get("delta") or {}
                     if isinstance(delta, dict):
-                        content_delta = _stringify_openrouter_value(
+                        content_delta = _stringify_openrouter_stream_value(
                             delta.get("content")
                         )
-                        reasoning_delta = _stringify_openrouter_value(
+                        reasoning_delta = _stringify_openrouter_stream_value(
                             delta.get("reasoning")
                         )
                         if not reasoning_delta:
                             reasoning_delta = _reasoning_details_to_text(
-                                delta.get("reasoning_details")
+                                delta.get("reasoning_details"),
+                                preserve_spacing=True,
                             )
                         if content_delta:
                             content_parts.append(content_delta)
