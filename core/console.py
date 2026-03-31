@@ -10,7 +10,6 @@ from typing import TextIO
 
 from rich.console import Console
 
-from config import get_config
 from .paths import get_runtime_dir
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
@@ -21,6 +20,8 @@ _TRANSCRIPT_STREAMS: list["TerminalTranscriptStream"] = []
 
 def _is_terminal_debug_enabled() -> bool:
 	try:
+		from config import get_config
+
 		return bool(get_config().get("terminal_debug", True))
 	except Exception:
 		return True

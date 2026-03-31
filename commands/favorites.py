@@ -8,7 +8,8 @@ from typing import List, Optional
 from rich.console import Console
 from rich.table import Table
 
-from core import get_standard_logger, console as core_console
+from core import get_standard_logger
+from core.console import console as core_console
 from core.paths import ensure_json_file, get_favorites_path
 from domain.utils import normalize_symbol
 

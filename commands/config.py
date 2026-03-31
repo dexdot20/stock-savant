@@ -8,7 +8,8 @@ from rich.console import Console
 from rich.table import Table
 
 from config import is_configured_secret
-from core import get_standard_logger, console as core_console
+from core import get_standard_logger
+from core.console import console as core_console
 from services.ai.providers.provider_metadata import get_provider_display_name
 
 logger = get_standard_logger(__name__)

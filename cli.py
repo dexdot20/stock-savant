@@ -63,8 +63,8 @@ from core import (
     log_operation_end,
     log_exception,
     BorsaException,
-    console,
 )
+from core.console import console
 from core.paths import get_runtime_dir
 from services.investor_profile import (
     build_investor_context,

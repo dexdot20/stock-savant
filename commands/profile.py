@@ -6,7 +6,7 @@ from rich.console import Console
 from rich.prompt import Prompt
 from rich.table import Table
 
-from core import console as core_console
+from core.console import console as core_console
 from services.investor_profile import (
     DEFAULT_PLAYBOOKS,
     get_playbook_choices,

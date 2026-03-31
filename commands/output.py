@@ -13,7 +13,7 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.markdown import Markdown
 
-from core import console as core_console
+from core.console import console as core_console
 from domain.utils import get_currency_symbol
 
 # Module-level cached config slices (avoids deepcopy on every display call).

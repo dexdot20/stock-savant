@@ -7,7 +7,7 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
 
-from core import console as core_console
+from core.console import console as core_console
 from services.alerts import create_price_alert, evaluate_alert_center, list_alerts
 
 

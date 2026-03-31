@@ -35,7 +35,6 @@ from .logging import (
     log_operation_end,
     LOG_FILE_PATH,
 )
-from .console import console
 
 # Public API
 __all__ = [
@@ -63,3 +62,11 @@ __all__ = [
     "log_operation_end",
     "LOG_FILE_PATH",
 ]
+
+
+def __getattr__(name: str):
+    if name == "console":
+        from .console import console as _console
+
+        return _console
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
