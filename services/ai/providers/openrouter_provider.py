@@ -17,6 +17,7 @@ from .base_provider import (
     post_provider_request_async,
 )
 from .cache_usage import extract_prompt_cache_usage, log_prompt_cache_usage
+from .native_tooling import ensure_tool_call_ids, finalize_stream_tool_calls, merge_stream_tool_calls
 
 
 @dataclass
@@ -260,6 +261,7 @@ async def _post_openrouter_stream_request_async(
     timeout = aiohttp.ClientTimeout(total=timeout_seconds)
     content_parts: List[str] = []
     reasoning_parts: List[str] = []
+    tool_calls_by_index: Dict[int, Dict[str, Any]] = {}
     finish_reason: Optional[str] = None
     usage: Optional[Dict[str, Any]] = None
 
@@ -330,7 +332,17 @@ async def _post_openrouter_stream_request_async(
                             content_parts.append(content_delta)
                         if reasoning_delta:
                             reasoning_parts.append(reasoning_delta)
+                        merge_stream_tool_calls(
+                            tool_calls_by_index,
+                            delta.get("tool_calls"),
+                        )
                         _emit_stream_delta(stream_state, delta)
+                    message = choice.get("message") or {}
+                    if isinstance(message, dict):
+                        merge_stream_tool_calls(
+                            tool_calls_by_index,
+                            message.get("tool_calls"),
+                        )
     except (RateLimitError, APIError):
         raise
     except asyncio.TimeoutError as exc:
@@ -346,16 +358,21 @@ async def _post_openrouter_stream_request_async(
 
     content = "".join(content_parts)
     reasoning = "".join(reasoning_parts)
-    if not content and not reasoning:
+    tool_calls = finalize_stream_tool_calls(tool_calls_by_index)
+    if not content and not reasoning and not tool_calls:
         raise APIError("OpenRouter returned empty stream response", auto_log=False)
+
+    message: Dict[str, Any] = {
+        "content": content,
+        "reasoning": reasoning,
+    }
+    if tool_calls:
+        message["tool_calls"] = tool_calls
 
     response: Dict[str, Any] = {
         "choices": [
             {
-                "message": {
-                    "content": content,
-                    "reasoning": reasoning,
-                },
+                "message": message,
                 "finish_reason": finish_reason,
             }
         ]
@@ -567,7 +584,7 @@ def _process_openrouter_response(
 
     message = choices[0].get("message", {})
     content = _stringify_openrouter_value(message.get("content"))
-    tool_calls = message.get("tool_calls")
+    tool_calls = ensure_tool_call_ids(message.get("tool_calls"))
     reasoning = _stringify_openrouter_value(message.get("reasoning"))
     if not reasoning:
         reasoning = _reasoning_details_to_text(message.get("reasoning_details"))

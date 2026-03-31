@@ -26,6 +26,10 @@ from services.ai.providers.agent_session_utils import (
     save_agent_session,
 )
 from services.ai.providers.system_prompt_utils import augment_system_prompt
+from services.ai.providers.native_tooling import (
+    build_native_tool_request_kwargs,
+    build_tool_result_history_message,
+)
 from services.ai.providers.tool_call_parser import (
     content_has_tool_call_markup,
     normalize_tool_calls,
@@ -570,6 +574,10 @@ class ComparisonAgent(ResearchAgentSupportMixin):
         consecutive_no_tool_calls = 0
         _NON_DEDUP_TOOLS = {"update_working_memory", "finish", "search_memory"}
         executed_tool_signatures: set[str] = set()
+        tool_request_kwargs = build_native_tool_request_kwargs(
+            "comparison",
+            max_parallel_tools=self._max_parallel_tools,
+        )
 
         while step < self.max_steps:
             step += 1
@@ -589,6 +597,7 @@ class ComparisonAgent(ResearchAgentSupportMixin):
                     request_type="comparison",
                     timeout_override=120,
                     console=console,
+                    **tool_request_kwargs,
                 )
             except Exception as e:
                 self.logger.error("Comparison AI request failed: %s", e)
@@ -613,7 +622,12 @@ class ComparisonAgent(ResearchAgentSupportMixin):
             if not isinstance(raw_content, str):
                 raw_content = ""
             tool_calls, content = parse_tool_calls_from_content(raw_content)
-            native_tool_calls = normalize_tool_calls(response.get("tool_calls"))
+            native_tool_call_payload = (
+                response.get("tool_calls")
+                if isinstance(response.get("tool_calls"), list)
+                else None
+            )
+            native_tool_calls = normalize_tool_calls(native_tool_call_payload)
             if native_tool_calls:
                 tool_calls = native_tool_calls
             if content.strip() in (
@@ -624,7 +638,7 @@ class ComparisonAgent(ResearchAgentSupportMixin):
 
             assistant_history_message = {"role": "assistant", "content": raw_content}
             if native_tool_calls:
-                assistant_history_message["tool_calls"] = response.get("tool_calls")
+                assistant_history_message["tool_calls"] = native_tool_call_payload
             history.append(assistant_history_message)
 
             # Bir önceki adımda işaretlenen geçici (ephemeral) araç çıktılarını sıkıştır.
@@ -643,15 +657,15 @@ class ComparisonAgent(ResearchAgentSupportMixin):
                     for _idx in _indices_list[:-_keep]:
                         if (
                             _idx < len(history)
-                            and history[_idx].get("role") == "user"
-                            and isinstance(history[_idx].get("content"), str)
-                            and history[_idx]["content"].startswith("<tool_result")
+                            and history[_idx].get("role") in {"user", "tool"}
                         ):
                             tool_content = history[_idx].get("content", "")
                             assistant_msg = self._find_previous_assistant(history, _idx)
                             self._capture_ephemeral_result_before_stub(
                                 tool_name=extract_tool_name_from_tool_result(
-                                    tool_content
+                                    history[_idx],
+                                    history=history,
+                                    message_index=_idx,
                                 ),
                                 tool_content=tool_content,
                                 assistant_has_memory_update=self._assistant_has_memory_update(
@@ -714,33 +728,32 @@ class ComparisonAgent(ResearchAgentSupportMixin):
                 has_block = content_has_tool_call_markup(raw_content)
                 consecutive_no_tool_calls += 1
                 self.logger.warning(
-                    "Agent responded without valid tool call block (%s, content=%d chars). Injecting correction (attempt %d).",
-                    "malformed JSON in block" if has_block else "no block found",
+                    "Agent responded without a usable tool call (%s, content=%d chars). Injecting correction (attempt %d).",
+                    "textual tool markup" if has_block else "no tool call found",
                     len(content),
                     consecutive_no_tool_calls,
                 )
                 if consecutive_no_tool_calls >= 2:
                     correction_msg = (
-                        "🚨 CRITICAL: Still no valid tool call after two attempts. "
-                        "Output ONLY this exact block and nothing else:\n"
+                        "🚨 CRITICAL: Still no usable tool call after two attempts. "
+                        "Use a native tool call now. If native tool calling is unavailable, reply with ONLY this exact strict JSON block:\n"
                         "```json\n"
                         '[{"name": "update_working_memory", "args": {"new_facts": ["retrying"]}}]\n'
                         "```"
                     )
                 elif has_block:
                     correction_msg = (
-                        "🚨 Your ```json block contained invalid JSON and could not be parsed. "
-                        "Common mistakes: single quotes instead of double quotes, trailing commas, Python True/False/None. "
-                        "Re-send using STRICT JSON (double quotes only). Format:\n"
+                        "🚨 Your last response wrote tool calls as text, but native tool calls are required when available. "
+                        "If you must fall back to text, the JSON must be strict and parseable. Format:\n"
                         "```json\n"
                         '[{"name": "tool_name", "args": {"key": "value"}}]\n'
                         "```"
                     )
                 else:
                     correction_msg = (
-                        "⚠️ Your last response did not include a ```json tool call block. "
-                        "Reply with ONLY prose + a single ```json block at the end. Do NOT write tool calls as plain text. "
-                        "Format:\n"
+                        "⚠️ Your last response did not produce a usable native tool call. "
+                        "Call the tool through the API instead of writing it in prose. "
+                        "If native tool calling is unavailable, fall back to a single strict JSON block:\n"
                         "```json\n"
                         '[{"name": "tool_name", "args": {"key": "value"}}]\n'
                         "```\n"
@@ -750,7 +763,7 @@ class ComparisonAgent(ResearchAgentSupportMixin):
                     step,
                     [],
                     assistant_summary=content,
-                    notes=["issued correction because no valid tool call block was parsed"],
+                    notes=["issued correction because no usable tool call was produced"],
                 )
                 history.append({"role": "user", "content": correction_msg})
                 continue
@@ -786,6 +799,29 @@ class ComparisonAgent(ResearchAgentSupportMixin):
                 if isinstance(mem_args, dict):
                     self._update_working_memory(mem_args, console)
                     total_memory_updates += 1
+                    if mem_call.get("id"):
+                        history.append(
+                            build_tool_result_history_message(
+                                tool_name="update_working_memory",
+                                result={
+                                    "status": "ok",
+                                    "memory_updated": True,
+                                    "counts": self.memory.summary_counts(),
+                                },
+                                tool_call=mem_call,
+                            )
+                        )
+                elif mem_call.get("id"):
+                    history.append(
+                        build_tool_result_history_message(
+                            tool_name="update_working_memory",
+                            result={
+                                "error": "Invalid arguments for update_working_memory",
+                                "error_code": "invalid_arguments",
+                            },
+                            tool_call=mem_call,
+                        )
+                    )
 
             finish_call = next(
                 (t for t in tool_calls if t.get("name") == "finish"), None
@@ -797,20 +833,28 @@ class ComparisonAgent(ResearchAgentSupportMixin):
                 if t.get("name") not in ("finish", "update_working_memory")
             ]
             finish_was_deferred = bool(finish_call and non_finish_tool_calls)
+            finish_deferred_notice: Optional[str] = None
             if finish_call and non_finish_tool_calls:
                 self.logger.warning(
                     "finish() called together with %d additional tool(s); deferring finish until tools are executed.",
                     len(non_finish_tool_calls),
                 )
-                history.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "⚠️ You called finish() together with other tools in the same step. "
-                            "finish() was ignored for now. First execute tool calls and process results, "
-                            "then call finish() in a separate step with full final_analysis."
-                        ),
-                    }
+                if finish_call.get("id"):
+                    history.append(
+                        build_tool_result_history_message(
+                            tool_name="finish",
+                            result={
+                                "status": "deferred",
+                                "error": "finish must be the only tool in its step",
+                                "error_code": "finish_deferred",
+                            },
+                            tool_call=finish_call,
+                        )
+                    )
+                finish_deferred_notice = (
+                    "⚠️ You called finish() together with other tools in the same step. "
+                    "finish() was ignored for now. First execute tool calls and process results, "
+                    "then call finish() in a separate step with full final_analysis."
                 )
                 finish_call = None
 
@@ -836,6 +880,18 @@ class ComparisonAgent(ResearchAgentSupportMixin):
                         memory_updates=memory_update_payloads,
                         notes=["finish() was rejected because final_analysis was empty"],
                     )
+                    if finish_call.get("id"):
+                        history.append(
+                            build_tool_result_history_message(
+                                tool_name="finish",
+                                result={
+                                    "status": "blocked",
+                                    "error": "finish requires a non-empty final_analysis",
+                                    "error_code": "missing_final_analysis",
+                                },
+                                tool_call=finish_call,
+                            )
+                        )
                     history.append(
                         {
                             "role": "user",
@@ -882,6 +938,18 @@ class ComparisonAgent(ResearchAgentSupportMixin):
                         memory_updates=memory_update_payloads,
                         notes=[f"premature finish blocked: {reason}"],
                     )
+                    if finish_call.get("id"):
+                        history.append(
+                            build_tool_result_history_message(
+                                tool_name="finish",
+                                result={
+                                    "status": "blocked",
+                                    "error": reason,
+                                    "error_code": "premature_finish",
+                                },
+                                tool_call=finish_call,
+                            )
+                        )
                     history.append(
                         {
                             "role": "user",
@@ -904,6 +972,17 @@ class ComparisonAgent(ResearchAgentSupportMixin):
                     memory_updates=memory_update_payloads,
                     notes=finish_notes,
                 )
+                if finish_call.get("id"):
+                    history.append(
+                        build_tool_result_history_message(
+                            tool_name="finish",
+                            result={
+                                "status": "ok",
+                                "accepted": True,
+                            },
+                            tool_call=finish_call,
+                        )
+                    )
                 await self.memory.flush()
                 session_path = self._save_session_snapshot(
                     active_session_id,
@@ -929,18 +1008,22 @@ class ComparisonAgent(ResearchAgentSupportMixin):
                 }
 
             tasks = []
-            param_map = []
-            skipped_due_to_limit: List[str] = []
+            param_map: List[Dict[str, Any]] = []
+            skipped_due_to_limit: List[Dict[str, Any]] = []
             executable_count = 0
             for tool_call in tool_calls:
                 fn_name = tool_call.get("name")
                 fn_args = tool_call.get("args", {})
+                tool_meta = {
+                    "name": fn_name or "unknown_tool",
+                    "tool_call": tool_call,
+                }
 
                 if not fn_name:
                     tasks.append(
                         self._mock_tool_error("Tool name missing in tool call.")
                     )
-                    param_map.append("unknown_tool")
+                    param_map.append(tool_meta)
                     continue
 
                 if fn_name == "update_working_memory":
@@ -950,7 +1033,7 @@ class ComparisonAgent(ResearchAgentSupportMixin):
                     tasks.append(
                         self._mock_tool_error(f"Invalid JSON arguments for {fn_name}")
                     )
-                    param_map.append(fn_name)
+                    param_map.append(tool_meta)
                     continue
 
                 fn_args = normalize_tool_args(fn_name, fn_args)
@@ -959,7 +1042,7 @@ class ComparisonAgent(ResearchAgentSupportMixin):
                 validation_error = validate_tool_args(fn_name, fn_args)
                 if validation_error:
                     tasks.append(self._mock_tool_error(validation_error))
-                    param_map.append(fn_name)
+                    param_map.append(tool_meta)
                     continue
 
                 # Pre-flight: search_memory requires 'query' or 'hit_ids'.
@@ -973,14 +1056,14 @@ class ComparisonAgent(ResearchAgentSupportMixin):
                                 "Provide a natural language query to search memory."
                             )
                         )
-                        param_map.append(fn_name)
+                        param_map.append(tool_meta)
                         continue
 
                 if (
                     self._max_parallel_tools is not None
                     and executable_count >= self._max_parallel_tools
                 ):
-                    skipped_due_to_limit.append(fn_name)
+                    skipped_due_to_limit.append(tool_meta)
                     continue
 
                 if fn_name not in _NON_DEDUP_TOOLS:
@@ -991,20 +1074,20 @@ class ComparisonAgent(ResearchAgentSupportMixin):
                                 f"Duplicate tool call skipped: '{fn_name}' was already called with identical parameters in a previous step. Use different parameters or a different tool."
                             )
                         )
-                        param_map.append(fn_name)
+                        param_map.append(tool_meta)
                         executable_count += 1
                         continue
                     if sig:
                         executed_tool_signatures.add(sig)
 
                 tasks.append(self._execute_tool_safe(fn_name, fn_args, console=console))
-                param_map.append(fn_name)
+                param_map.append(tool_meta)
                 executable_count += 1
 
             results = await asyncio.gather(*tasks)
-            executed_tools = list(param_map)
+            executed_tools = [item["name"] for item in param_map]
             journal_tool_results = [
-                {"name": param_map[i], "result": result}
+                {"name": param_map[i]["name"], "result": result}
                 for i, result in enumerate(results)
             ]
             journal_notes: List[str] = []
@@ -1014,15 +1097,61 @@ class ComparisonAgent(ResearchAgentSupportMixin):
                 )
 
             if skipped_due_to_limit:
-                skipped_str = ", ".join(skipped_due_to_limit)
+                skipped_names = [item["name"] for item in skipped_due_to_limit]
+                skipped_str = ", ".join(skipped_names)
                 self.logger.info(
                     "Tool concurrency limit applied (%d). Deferred tools: %s",
                     self._max_parallel_tools,
                     skipped_str,
                 )
                 journal_notes.append(
-                    f"deferred {len(skipped_due_to_limit)} tool(s) because of the parallel tool limit"
+                    f"deferred {len(skipped_names)} tool(s) because of the parallel tool limit"
                 )
+                for skipped_tool in skipped_due_to_limit:
+                    if skipped_tool["tool_call"].get("id"):
+                        history.append(
+                            build_tool_result_history_message(
+                                tool_name=skipped_tool["name"],
+                                result={
+                                    "status": "deferred",
+                                    "error": "parallel tool limit reached for this step",
+                                    "error_code": "parallel_limit",
+                                },
+                                tool_call=skipped_tool["tool_call"],
+                            )
+                        )
+
+            for i, result in enumerate(results):
+                tool_name = param_map[i]["name"]
+                tool_call = param_map[i]["tool_call"]
+                if tool_name not in ("finish", "update_working_memory"):
+                    total_non_memory_tools_executed += 1
+
+                history.append(
+                    build_tool_result_history_message(
+                        tool_name=tool_name,
+                        result=result,
+                        tool_call=tool_call,
+                    )
+                )
+
+                # Araç çıktılarını türüne göre ephemeral listelerine kaydet.
+                if tool_name in _EPHEMERAL_URL_TOOLS:
+                    self._fetch_indices.append(len(history) - 1)
+                elif tool_name in _EPHEMERAL_SEARCH_TOOLS:
+                    self._search_indices.append(len(history) - 1)
+
+            if finish_deferred_notice:
+                history.append(
+                    {
+                        "role": "user",
+                        "content": finish_deferred_notice,
+                    }
+                )
+
+            if skipped_due_to_limit:
+                skipped_names = [item["name"] for item in skipped_due_to_limit]
+                skipped_str = ", ".join(skipped_names)
                 history.append(
                     {
                         "role": "user",
@@ -1033,28 +1162,10 @@ class ComparisonAgent(ResearchAgentSupportMixin):
                     }
                 )
 
-            for i, result in enumerate(results):
-                tool_name = param_map[i]
-                if tool_name not in ("finish", "update_working_memory"):
-                    total_non_memory_tools_executed += 1
-
-                history.append(
-                    {
-                        "role": "user",
-                        "content": f"<tool_result name=\"{tool_name}\">\n{result}\n</tool_result>",
-                    }
-                )
-
-                # Araç çıktılarını türüne göre ephemeral listelerine kaydet.
-                if tool_name in _EPHEMERAL_URL_TOOLS:
-                    self._fetch_indices.append(len(history) - 1)
-                elif tool_name in _EPHEMERAL_SEARCH_TOOLS:
-                    self._search_indices.append(len(history) - 1)
-
             self._record_tool_journal_step(
                 step,
                 tool_calls,
-                skipped_due_to_limit,
+                [item["name"] for item in skipped_due_to_limit],
                 assistant_summary=content,
                 memory_updates=memory_update_payloads,
                 tool_results=journal_tool_results,

@@ -165,7 +165,16 @@ _partials:
 
   shared_tool_call_format: |
     ## TOOL CALL FORMAT
-    Every response MUST end with a JSON code block containing your tool calls:
+    Use native API tool calling whenever tools are available. Do NOT write tool calls in normal prose when native tool calling is active.
+
+    Native-first rules:
+    - Call tools through the provider's tool-calling interface instead of printing tool JSON in the message body.
+    - You may include short reasoning or status text in the assistant content, but the actual tool invocation must be native.
+    - `finish` MUST be the ONLY tool in its step — never mix finish with other tools.
+    - When done, call `finish` with the FULL report inside `final_analysis`.
+    - ⚠️ Never call `finish` with an empty or missing `final_analysis`.
+
+    Fallback only if native tool calling is unavailable:
     ```json
     [
       {"name": "tool_name", "args": {"key": "value"}},
@@ -176,11 +185,7 @@ _partials:
     - Use **strict JSON**: double quotes only, no trailing commas, no Python literals (use true/false/null, not True/False/None).
     - Put ALL tool calls in ONE array inside ONE ```json block.
     - Do NOT write tool calls as plain text or prose outside the block.
-    - `finish` MUST be the ONLY tool in its step — never mix finish with other tools.
-    - When done, call `finish` with the FULL report inside `final_analysis`.
-    - ⚠️ Never call `finish` with an empty or missing `final_analysis`.
-    - 🚨 EVERY response — including your very first — MUST end with a ```json tool call block.
-      A response without a ```json block is treated as an error and wastes a round-trip.
+    - Use the fallback block only when native tool calling is not available.
 
   shared_factuality_guardrails: |
     ## FACTUALITY & TIME GUARDRAILS
@@ -404,8 +409,8 @@ pre_research_agent: |
 
   ## MANDATORY FIRST ACTION
   Your VERY FIRST response MUST call a tool (e.g. `search_memory`).
-  Do NOT write any planning text, summary, or prose without a ```json tool call block.
-  A response without a ```json block is treated as an error and causes a wasted round-trip.
+  When native tool calling is available, invoke the tool natively instead of printing JSON in the response body.
+  Only fall back to a strict ```json block if native tool calling is unavailable.
 
   ## AVAILABLE TOOLS
 

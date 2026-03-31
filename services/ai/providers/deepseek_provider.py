@@ -17,6 +17,7 @@ from .base_provider import (
     post_provider_request_async,
 )
 from .cache_usage import extract_prompt_cache_usage, log_prompt_cache_usage
+from .native_tooling import ensure_tool_call_ids, finalize_stream_tool_calls, merge_stream_tool_calls
 
 
 @dataclass
@@ -158,6 +159,7 @@ async def _post_deepseek_stream_request_async(
     timeout = aiohttp.ClientTimeout(total=timeout_seconds)
     content_parts: List[str] = []
     reasoning_parts: List[str] = []
+    tool_calls_by_index: Dict[int, Dict[str, Any]] = {}
     finish_reason: Optional[str] = None
     usage: Optional[Dict[str, Any]] = None
 
@@ -223,7 +225,17 @@ async def _post_deepseek_stream_request_async(
                             content_parts.append(content_delta)
                         if reasoning_delta:
                             reasoning_parts.append(reasoning_delta)
+                        merge_stream_tool_calls(
+                            tool_calls_by_index,
+                            delta.get("tool_calls"),
+                        )
                         _emit_stream_delta(stream_state, delta)
+                    message = choice.get("message") or {}
+                    if isinstance(message, dict):
+                        merge_stream_tool_calls(
+                            tool_calls_by_index,
+                            message.get("tool_calls"),
+                        )
     except (RateLimitError, APIError):
         raise
     except asyncio.TimeoutError as exc:
@@ -239,16 +251,21 @@ async def _post_deepseek_stream_request_async(
 
     content = "".join(content_parts)
     reasoning = "".join(reasoning_parts)
-    if not content and not reasoning:
+    tool_calls = finalize_stream_tool_calls(tool_calls_by_index)
+    if not content and not reasoning and not tool_calls:
         raise APIError("DeepSeek returned empty stream response", auto_log=False)
+
+    message: Dict[str, Any] = {
+        "content": content,
+        "reasoning_content": reasoning,
+    }
+    if tool_calls:
+        message["tool_calls"] = tool_calls
 
     response: Dict[str, Any] = {
         "choices": [
             {
-                "message": {
-                    "content": content,
-                    "reasoning_content": reasoning,
-                },
+                "message": message,
                 "finish_reason": finish_reason,
             }
         ]
@@ -315,6 +332,7 @@ def _prepare_deepseek_payload(
     request_type: str,
     context: ProviderContext,
     model_override: Optional[str] = None,
+    **kwargs: Any,
 ) -> tuple[str, Dict[str, str], Dict[str, Any], str]:
     provider_cfg = context.providers_cfg.get("deepseek", {})
     api_key = provider_cfg.get("api_key")
@@ -366,6 +384,11 @@ def _prepare_deepseek_payload(
     response_format = provider_cfg.get("response_format")
     if isinstance(response_format, dict) and response_format.get("type"):
         payload["response_format"] = response_format
+
+    for key in ("tools", "tool_choice"):
+        value = kwargs.get(key)
+        if value is not None:
+            payload[key] = value
 
     return url, headers, payload, model
 
@@ -444,7 +467,7 @@ def _process_deepseek_response(
 
     message = choices[0].get("message", {})
     content = _stringify_deepseek_value(message.get("content"))
-    tool_calls = message.get("tool_calls")
+    tool_calls = ensure_tool_call_ids(message.get("tool_calls"))
     reasoning = _stringify_deepseek_value(message.get("reasoning_content"))
     refusal = _stringify_deepseek_value(message.get("refusal"))
     finish_reason = choices[0].get("finish_reason")
@@ -530,6 +553,7 @@ def call_deepseek(
         request_type,
         context,
         model_override,
+        **kwargs,
     )
 
     stream_state = _resolve_stream_state(
@@ -584,6 +608,7 @@ async def call_deepseek_async(
         request_type,
         context,
         model_override,
+        **kwargs,
     )
 
     stream_state = _resolve_stream_state(

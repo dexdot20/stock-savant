@@ -13,7 +13,12 @@ from services.ai.providers.agent_guardrails import (
 )
 from services.ai.providers.deepseek_provider import (
     _ConsoleStreamRenderer,
+    _prepare_deepseek_payload,
     _process_deepseek_response,
+)
+from services.ai.providers.native_tooling import (
+    build_native_tool_request_kwargs,
+    build_tool_result_history_message,
 )
 from services.ai.providers.openrouter_provider import (
     _emit_stream_delta as _emit_openrouter_stream_delta,
@@ -25,6 +30,7 @@ from services.ai.providers.pre_research_agent import PreResearchAgent
 from services.ai.providers.prompt_store import PromptStore
 from services.ai.providers.tool_call_parser import (
     content_has_tool_call_markup,
+    normalize_tool_calls,
     parse_tool_calls_from_content,
 )
 
@@ -159,6 +165,25 @@ class AgentGuardrailNormalizationTests(unittest.TestCase):
 
 
 class ToolCallParserCompatibilityTests(unittest.TestCase):
+    def test_normalize_native_tool_calls_preserves_id(self) -> None:
+        tool_calls = normalize_tool_calls(
+            [
+                {
+                    "id": "call_123",
+                    "type": "function",
+                    "function": {
+                        "name": "search_memory",
+                        "arguments": '{"query": "AKBNK"}',
+                    },
+                }
+            ]
+        )
+
+        self.assertEqual(tool_calls[0]["id"], "call_123")
+        self.assertEqual(tool_calls[0]["type"], "function")
+        self.assertEqual(tool_calls[0]["name"], "search_memory")
+        self.assertEqual(tool_calls[0]["args"], {"query": "AKBNK"})
+
     def test_parse_legacy_tool_call_markup(self) -> None:
         content = (
             "I'll help you check prior context.\n"
@@ -201,6 +226,116 @@ class ToolCallParserCompatibilityTests(unittest.TestCase):
 
 
 class ReasoningUxTests(unittest.TestCase):
+    def test_native_tool_request_kwargs_include_tools_and_auto_choice(self) -> None:
+        kwargs = build_native_tool_request_kwargs(
+            "pre_research",
+            max_parallel_tools=4,
+        )
+
+        self.assertTrue(kwargs["tools"])
+        self.assertEqual(kwargs["tool_choice"], "auto")
+        self.assertTrue(kwargs["parallel_tool_calls"])
+
+    def test_build_tool_result_history_message_uses_role_tool_for_native_call(self) -> None:
+        message = build_tool_result_history_message(
+            tool_name="search_memory",
+            result={"status": "ok"},
+            tool_call={"id": "call_1", "name": "search_memory"},
+        )
+
+        self.assertEqual(message["role"], "tool")
+        self.assertEqual(message["tool_call_id"], "call_1")
+        self.assertIn('"status": "ok"', message["content"])
+
+    def test_deepseek_payload_forwards_native_tools(self) -> None:
+        context = ProviderContext(
+            logger=logging.getLogger("deepseek-payload-test"),
+            providers_cfg={"deepseek": {"api_key": "deepseek-key"}},
+            model_configs={},
+            request_timeout=30,
+        )
+
+        _, _, payload, _ = _prepare_deepseek_payload(
+            [{"role": "user", "content": "hello"}],
+            "news",
+            context,
+            tools=[{"type": "function", "function": {"name": "search_memory"}}],
+            tool_choice="auto",
+        )
+
+        self.assertEqual(payload["tool_choice"], "auto")
+        self.assertEqual(payload["tools"][0]["function"]["name"], "search_memory")
+
+    def test_openrouter_response_adds_missing_tool_call_ids(self) -> None:
+        context = ProviderContext(
+            logger=logging.getLogger("openrouter-native-tool-test"),
+            providers_cfg={},
+            model_configs={},
+            request_timeout=30,
+        )
+
+        response = _process_openrouter_response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "type": "function",
+                                    "function": {
+                                        "name": "search_memory",
+                                        "arguments": "{}",
+                                    },
+                                }
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ]
+            },
+            context,
+            "openai/gpt-5.2",
+            "pre_research",
+        )
+
+        self.assertEqual(response["tool_calls"][0]["id"], "tool_call_0")
+
+    def test_deepseek_response_adds_missing_tool_call_ids(self) -> None:
+        context = ProviderContext(
+            logger=logging.getLogger("deepseek-native-tool-test"),
+            providers_cfg={},
+            model_configs={},
+            request_timeout=30,
+        )
+
+        response = _process_deepseek_response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "type": "function",
+                                    "function": {
+                                        "name": "search_memory",
+                                        "arguments": "{}",
+                                    },
+                                }
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ]
+            },
+            context,
+            "deepseek-chat",
+            "news",
+        )
+
+        self.assertEqual(response["tool_calls"][0]["id"], "tool_call_0")
+
     def test_deepseek_response_preserves_streaming_metadata(self) -> None:
         context = ProviderContext(
             logger=logging.getLogger("deepseek-response-test"),

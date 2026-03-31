@@ -27,7 +27,10 @@ from services.ai.providers.tool_journal_utils import (
     summarize_memory_update_args,
     summarize_tool_result,
 )
-from services.ai.providers.tool_call_parser import parse_tool_calls_from_content
+from services.ai.providers.tool_call_parser import (
+    normalize_tool_calls,
+    parse_tool_calls_from_content,
+)
 from services.ai.providers.system_prompt_utils import augment_system_prompt
 from services.tools import get_tool_quality_metrics
 
@@ -311,13 +314,12 @@ class ResearchAgentSupportMixin:
         self._search_indices = []
         active_url_tools = url_tools or frozenset()
         for idx, message in enumerate(history):
-            if message.get("role") != "user":
+            role = str(message.get("role") or "").strip().lower()
+            if role not in {"user", "tool"}:
                 continue
-            content = message.get("content", "")
-            if not isinstance(content, str) or not content.startswith("<tool_result"):
+            tool_name = self._extract_tool_name_from_history_message(history, idx)
+            if not tool_name:
                 continue
-            match = re.search(r'<tool_result\s+name="([^"]+)"', content)
-            tool_name = match.group(1) if match else ""
             if tool_name in active_url_tools:
                 self._fetch_indices.append(idx)
             elif tool_name in search_tools:
@@ -340,20 +342,17 @@ class ResearchAgentSupportMixin:
         total_non_memory_tools_executed = 0
         total_memory_updates = 0
 
-        for message in history:
+        for index, message in enumerate(history):
             role = message.get("role")
             content = message.get("content", "")
             if (
-                role == "user"
-                and isinstance(content, str)
-                and content.startswith("<tool_result")
+                role in {"user", "tool"}
             ):
-                match = re.search(r'<tool_result\s+name="([^"]+)"', content)
-                tool_name = match.group(1) if match else ""
+                tool_name = self._extract_tool_name_from_history_message(history, index)
                 if tool_name and tool_name not in ("finish", "update_working_memory"):
                     total_non_memory_tools_executed += 1
             elif role == "assistant":
-                tool_calls, _ = parse_tool_calls_from_content(content)
+                tool_calls = self._message_tool_calls(message)
                 total_memory_updates += sum(
                     1
                     for call in tool_calls
@@ -378,11 +377,50 @@ class ResearchAgentSupportMixin:
     def _assistant_has_memory_update(assistant_msg: Optional[Dict[str, Any]]) -> bool:
         if not assistant_msg:
             return False
-        parsed_calls, _ = parse_tool_calls_from_content(assistant_msg.get("content", ""))
-        for call in parsed_calls:
+        for call in ResearchAgentSupportMixin._message_tool_calls(assistant_msg):
             if call.get("name") == "update_working_memory":
                 return True
         return False
+
+    @staticmethod
+    def _message_tool_calls(message: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not isinstance(message, dict):
+            return []
+        native_calls = normalize_tool_calls(message.get("tool_calls"))
+        if native_calls:
+            return native_calls
+        parsed_calls, _ = parse_tool_calls_from_content(message.get("content", ""))
+        return parsed_calls
+
+    @staticmethod
+    def _extract_tool_name_from_history_message(
+        history: List[Dict[str, Any]],
+        index: int,
+    ) -> str:
+        if index < 0 or index >= len(history):
+            return ""
+
+        message = history[index]
+        role = str(message.get("role") or "").strip().lower()
+        if role == "tool":
+            tool_call_id = str(message.get("tool_call_id") or "").strip()
+            if tool_call_id:
+                assistant_message = ResearchAgentSupportMixin._find_previous_assistant(
+                    history,
+                    index,
+                )
+                for tool_call in ResearchAgentSupportMixin._message_tool_calls(
+                    assistant_message
+                ):
+                    if str(tool_call.get("id") or "").strip() == tool_call_id:
+                        return str(tool_call.get("name") or "").strip()
+            return ""
+
+        content = message.get("content", "")
+        if not isinstance(content, str) or not content.startswith("<tool_result"):
+            return ""
+        match = re.search(r'<tool_result\s+name="([^"]+)"', content)
+        return match.group(1) if match else ""
 
     @staticmethod
     def _prepare_fetch_digest_payload(raw_result: Any) -> str:

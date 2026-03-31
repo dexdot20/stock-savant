@@ -227,6 +227,8 @@ def _coerce_args(value: Any) -> Dict[str, Any]:
 def _normalize_tool_call(item: Any) -> Dict[str, Any] | None:
     if not isinstance(item, dict):
         return None
+    tool_call_id = str(item.get("id") or "").strip()
+    tool_type = str(item.get("type") or "function").strip() or "function"
     if "function" in item and isinstance(item.get("function"), dict):
         fn = item["function"]
         name = fn.get("name")
@@ -236,7 +238,12 @@ def _normalize_tool_call(item: Any) -> Dict[str, Any] | None:
         args = _coerce_args(item.get("args", item.get("arguments", {})))
     if not isinstance(name, str) or not name.strip():
         return None
-    return {"name": name.strip(), "args": args}
+    normalized = {"name": name.strip(), "args": args}
+    if tool_call_id:
+        normalized["id"] = tool_call_id
+    if tool_type:
+        normalized["type"] = tool_type
+    return normalized
 
 
 def _normalize_tool_payload(payload: Any) -> List[Dict[str, Any]]:

@@ -5,6 +5,8 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
+from services.ai.providers.tool_call_parser import normalize_tool_calls
+
 
 def normalize_history_archives(value: Any) -> List[Dict[str, Any]]:
     if not isinstance(value, list):
@@ -44,7 +46,24 @@ def archive_history_segment(
     )
 
 
-def extract_tool_name_from_tool_result(content: Any) -> str:
+def extract_tool_name_from_tool_result(
+    content: Any,
+    *,
+    history: Optional[List[Dict[str, Any]]] = None,
+    message_index: Optional[int] = None,
+) -> str:
+    if isinstance(content, dict):
+        role = str(content.get("role") or "").strip().lower()
+        if role == "tool":
+            resolved = _resolve_tool_name_from_history(
+                history,
+                message_index,
+                str(content.get("tool_call_id") or "").strip(),
+            )
+            if resolved:
+                return resolved
+        content = content.get("content", "")
+
     if not isinstance(content, str):
         return "tool"
     match = re.search(r'<tool_result\s+name="([^"]+)"', content)
@@ -54,6 +73,8 @@ def extract_tool_name_from_tool_result(content: Any) -> str:
 
 
 def extract_tool_payload_from_result(content: Any) -> Any:
+    if isinstance(content, dict):
+        content = content.get("content", content)
     if not isinstance(content, str):
         return content
 
@@ -66,6 +87,24 @@ def extract_tool_payload_from_result(content: Any) -> Any:
         return json.loads(payload_text)
     except Exception:
         return payload_text
+
+
+def _resolve_tool_name_from_history(
+    history: Optional[List[Dict[str, Any]]],
+    message_index: Optional[int],
+    tool_call_id: str,
+) -> str:
+    if not history or message_index is None or not tool_call_id:
+        return ""
+
+    for idx in range(message_index - 1, -1, -1):
+        message = history[idx]
+        if str(message.get("role") or "").strip().lower() != "assistant":
+            continue
+        for tool_call in normalize_tool_calls(message.get("tool_calls")):
+            if str(tool_call.get("id") or "").strip() == tool_call_id:
+                return str(tool_call.get("name") or "").strip()
+    return ""
 
 
 def build_ephemeral_evidence_record(
