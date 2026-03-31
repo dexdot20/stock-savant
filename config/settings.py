@@ -82,6 +82,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "cache_enabled": True,
     "use_company_keywords": True,
     "max_workers": 4,
+    "terminal_debug": True,
 
     # Shared HTTP behavior for news search, content extraction and generic tools.
     # The previous 300s timeout was too forgiving and could stall the whole flow.

@@ -150,13 +150,20 @@ def display_startup_info(console: Console) -> None:
     Args:
         console: Rich console instance for displaying formatted output
     """
+    market_summary = get_market_summary()
+    open_markets = sum(1 for is_open, _ in market_summary.values() if is_open)
+    closed_markets = len(market_summary) - open_markets
+
     # Welcome message
     console.print()
     console.print(
         Panel.fit(
             "[bold cyan]🎯 Welcome to Struct[/bold cyan]\n"
-            "[dim]Your AI-Powered Stock Analysis Assistant[/dim]\n"
-            "[dim italic]Make informed investment decisions with data-driven insights[/dim italic]",
+            "[dim]AI-powered stock analysis, comparison, and portfolio tracking from the terminal.[/dim]\n\n"
+            "[bold]Quick start[/bold]\n"
+            "[dim]1[/dim] Analyze stock  •  [dim]2[/dim] Batch analysis  •  [dim]3[/dim] Pre-research  •  [dim]4[/dim] Compare companies\n"
+            "[dim]5[/dim] Financial data  •  [dim]6[/dim] Index / ETF data  •  [dim]7[/dim] History  •  [dim]8[/dim] Favorites  •  [dim]9[/dim] Portfolio\n\n"
+            f"[dim]Open markets:[/dim] [green]{open_markets}[/green]  [dim]| Closed:[/dim] [red]{closed_markets}[/red]  [dim]| Tip:[/dim] type a menu number and press Enter.",
             border_style="cyan",
             box=box.ROUNDED,
         )
@@ -164,15 +171,15 @@ def display_startup_info(console: Console) -> None:
 
     # Market status table
     table = Table(
-        title="📊 Market Status Information",
+        title="📊 Market Snapshot",
         show_header=True,
-        header_style="bold magenta",
+        header_style="bold cyan",
         box=box.ROUNDED,
         title_style="bold yellow",
     )
     table.add_column("Exchange", style="cyan", justify="left")
     table.add_column("Status", style="white", justify="center")
-    table.add_column("Information", style="dim", justify="left")
+    table.add_column("Next Open", style="dim", justify="left")
 
     for market_code, market in MARKETS.items():
         is_open, status = is_market_open(market)
@@ -180,15 +187,24 @@ def display_startup_info(console: Console) -> None:
         # Status indicator
         if is_open:
             status_indicator = f"[green]● {status}[/green]"
-            info = ""
+            info = "Trading now"
         else:
             status_indicator = f"[red]● {status}[/red]"
             _, countdown = calculate_next_opening(market)
-            info = f"Opening in: {countdown}"
+            info = f"Opening in {countdown}"
 
         table.add_row(f"{market.name} ({market.code})", status_indicator, info)
 
     console.print(table)
+    console.print(
+        Panel.fit(
+            "[bold]Usage hints[/bold]\n"
+            "[dim]• Use q, quit, or exit in guided prompts when cancellation is supported.[/dim]\n"
+            "[dim]• Saved output and terminal transcripts are written under instance/.[/dim]",
+            border_style="cyan",
+            box=box.ROUNDED,
+        )
+    )
 
 
 def get_market_summary() -> Dict[str, Tuple[bool, str]]:

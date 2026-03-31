@@ -24,6 +24,7 @@ from rich.status import Status
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
+from rich import box
 
 from commands.analyze import analyze_multiple_stocks, analyze_single_stock
 from commands.config import show_config, validate_config
@@ -80,18 +81,58 @@ class InteractiveCLI:
     def __init__(self, *, console: Console) -> None:
         self.console = console
         self.config = get_config()
-        self._main_menu: Dict[str, tuple[str, Callable[[], None]]] = {
-            "1": ("Analyze Stock", self._handle_analyze_stock),
-            "2": ("Batch Stock Analysis", self._handle_analyze_batch),
-            "3": ("Pre-Research Agent", self._handle_pre_research),
-            "4": ("Compare Companies", self._handle_compare_companies),
-            "5": ("Query Company Financial Data", self._handle_company_financial_data),
-            "6": ("Query Index / ETF Data", self._handle_index_etf_data),
-            "7": ("Analysis History", self._show_history_menu),
-            "8": ("Favorite Companies", self._handle_favorites),
-            "9": ("Portfolio Management", self._handle_portfolio_management),
-            "10": ("Settings", self._show_settings_menu),
-            "0": ("Exit", lambda: None),
+        self._main_menu: Dict[str, tuple[str, str, Callable[[], None]]] = {
+            "1": (
+                "Analyze Stock",
+                "Guided single-symbol analysis with market context",
+                self._handle_analyze_stock,
+            ),
+            "2": (
+                "Batch Stock Analysis",
+                "Run the same analysis across a symbol list",
+                self._handle_analyze_batch,
+            ),
+            "3": (
+                "Pre-Research Agent",
+                "Gather background information before analysis",
+                self._handle_pre_research,
+            ),
+            "4": (
+                "Compare Companies",
+                "Compare fundamentals and investment signals",
+                self._handle_compare_companies,
+            ),
+            "5": (
+                "Query Company Financial Data",
+                "Inspect company-level financial data quickly",
+                self._handle_company_financial_data,
+            ),
+            "6": (
+                "Query Index / ETF Data",
+                "Inspect benchmark and ETF data",
+                self._handle_index_etf_data,
+            ),
+            "7": (
+                "Analysis History",
+                "Review saved reports and past decisions",
+                self._show_history_menu,
+            ),
+            "8": (
+                "Favorite Companies",
+                "Manage your watchlist and quick-run favorites",
+                self._handle_favorites,
+            ),
+            "9": (
+                "Portfolio Management",
+                "Track positions, risk, and alerts",
+                self._handle_portfolio_management,
+            ),
+            "10": (
+                "Settings",
+                "Review configuration, profile, and file shortcuts",
+                self._show_settings_menu,
+            ),
+            "0": ("Exit", "Close the interactive session", lambda: None),
         }
         self._session_start = datetime.now()
         logger.info("InteractiveCLI started - Session ID: %s", id(self))
@@ -115,7 +156,7 @@ class InteractiveCLI:
             try:
                 self._show_main_menu()
                 choice = Prompt.ask(
-                    "Choice",
+                    "[cyan]Choice[/cyan]",
                     choices=list(self._main_menu.keys()),
                     default="1",
                     show_choices=False,
@@ -135,7 +176,7 @@ class InteractiveCLI:
                     )
                     return
 
-                _, handler = self._main_menu[choice]
+                _, _, handler = self._main_menu[choice]
                 self._execute(handler)
             except EOFError:
                 logger.warning("EOF received - ending session")
@@ -173,17 +214,62 @@ class InteractiveCLI:
     # Menu helpers
     # --------
     def _show_main_menu(self) -> None:
-        table = Table(title="Main Menu", show_header=True, header_style="bold magenta")
-        table.add_column("#", style="cyan", justify="center")
-        table.add_column("Action", style="green")
+        self.console.print()
+        self.console.print(
+            Panel.fit(
+                "[bold cyan]Struct[/bold cyan]\n"
+                "[dim]Terminal workspace for stock analysis, comparison, and portfolio review.[/dim]\n\n"
+                "[bold]Quick tip:[/bold] type a menu number and press Enter. Use [bold]0[/bold] to exit and [bold]q[/bold] in guided prompts to cancel when available.",
+                title="Welcome",
+                border_style="cyan",
+                box=box.ROUNDED,
+            )
+        )
 
-        for key, (label, _) in self._main_menu.items():
+        table = Table(
+            title="Main Menu",
+            show_header=True,
+            header_style="bold cyan",
+            box=box.ROUNDED,
+            title_style="bold yellow",
+        )
+        table.add_column("#", style="cyan", justify="center", no_wrap=True)
+        table.add_column("Action", style="green")
+        table.add_column("What it does", style="dim")
+
+        for key, (label, description, _) in self._main_menu.items():
             if key == "0":
                 continue
-            table.add_row(key, label)
-        table.add_row("0", "Exit")
+            table.add_row(key, label, description)
+        table.add_row("0", "Exit", "Close the interactive session")
 
         self.console.print(table)
+
+    def _render_simple_menu(
+        self,
+        title: str,
+        options: Dict[str, tuple[str, Callable[[], None]]],
+        *,
+        subtitle: str,
+    ) -> None:
+        self.console.print()
+        self.console.print(
+            Panel.fit(
+                f"[bold cyan]{title}[/bold cyan]\n[dim]{subtitle}[/dim]",
+                border_style="cyan",
+                box=box.ROUNDED,
+            )
+        )
+
+        table = Table(show_header=True, header_style="bold cyan", box=box.ROUNDED)
+        table.add_column("#", style="cyan", justify="center", no_wrap=True)
+        table.add_column("Action", style="green")
+        for key, (label, _) in options.items():
+            table.add_row(key, label)
+        self.console.print(table)
+
+    def _pause(self, message: str = "Press Enter to continue") -> None:
+        self.console.input(f"[dim]{message}[/dim]")
 
     def _execute(self, handler: Callable[[], None]) -> None:
         handler_name = (
@@ -240,44 +326,43 @@ class InteractiveCLI:
     def _handle_company_financial_data(self) -> None:
         """Handle company financial data query."""
         handle_company_financial_query(self.console)
-        Prompt.ask("\nPress Enter to continue")
+        self._pause()
 
     def _handle_index_etf_data(self) -> None:
         """Handle index/ETF financial data query."""
         handle_index_etf_financial_query(self.console)
-        Prompt.ask("\nPress Enter to continue")
+        self._pause()
 
     def _handle_pre_research(self) -> None:
         """Handle pre-research agent flow."""
         handle_pre_research(self.console)
-        Prompt.ask("\nPress Enter to continue")
+        self._pause()
 
     def _handle_compare_companies(self) -> None:
         """Handle company comparison flow."""
         handle_compare_companies(self.console)
-        Prompt.ask("\nPress Enter to continue")
+        self._pause()
 
     def _handle_favorites(self) -> None:
         """Handle favorites menu."""
         while True:
-            self.console.print()
-            self.console.print(
-                Panel.fit(
-                    "[bold cyan]⭐ Favorite Companies[/bold cyan]\n\n"
-                    "1. [green]List[/green]\n"
-                    "2. [green]Add[/green]\n"
-                    "3. [green]Remove[/green]\n"
-                    "4. [green]Analyze Favorite (Single)[/green]\n"
-                    "5. [green]Analyze All Favorites[/green]\n"
-                    "0. [yellow]Go Back[/yellow]",
-                    title="Favorites Menu",
-                    border_style="cyan",
-                )
+            options: Dict[str, tuple[str, Callable[[], None]]] = {
+                "1": ("List favorites", lambda: list_favorites(self.console)),
+                "2": ("Add favorite", lambda: None),
+                "3": ("Remove favorite", lambda: None),
+                "4": ("Analyze favorite (single)", lambda: None),
+                "5": ("Analyze all favorites", lambda: None),
+                "0": ("Go back", lambda: None),
+            }
+            self._render_simple_menu(
+                "⭐ Favorite Companies",
+                options,
+                subtitle="Keep a small watchlist close and run analysis without retyping symbols.",
             )
 
             choice = Prompt.ask(
-                "Choice",
-                choices=["1", "2", "3", "4", "5", "0"],
+                "[cyan]Choice[/cyan]",
+                choices=list(options.keys()),
                 default="1",
                 show_choices=False,
             )
@@ -286,7 +371,7 @@ class InteractiveCLI:
                 break
             elif choice == "1":
                 list_favorites(self.console)
-                Prompt.ask("\nPress Enter to continue")
+                self._pause()
             elif choice == "2":
                 symbol = Prompt.ask("Stock Symbol to Add (e.g., AAPL)").upper()
                 if symbol:
@@ -298,6 +383,7 @@ class InteractiveCLI:
                         self.console.print(
                             f"[yellow]⚠️ {symbol} is already in favorites.[/yellow]"
                         )
+                    self._pause()
             elif choice == "3":
                 favorites = list_favorites(self.console, show_numbers=True)
                 if not favorites:
@@ -326,6 +412,7 @@ class InteractiveCLI:
                         self.console.print(
                             f"[red]❌ {symbol_to_remove} not found in favorites.[/red]"
                         )
+                self._pause()
 
             elif choice == "4":
                 favorites = list_favorites(self.console, show_numbers=True)
@@ -333,15 +420,27 @@ class InteractiveCLI:
                     continue
 
                 fav_choice = Prompt.ask(
-                    "Enter the number of the stock to analyze", default=""
+                    "Enter the number or symbol of the stock to analyze", default=""
                 )
                 if fav_choice.isdigit():
                     idx = int(fav_choice) - 1
                     if 0 <= idx < len(favorites):
                         symbol = favorites[idx]
                         self._run_single_stock_analysis(symbol)
+                        self._pause()
                     else:
                         self.console.print("[red]Invalid number.[/red]")
+                        self._pause()
+                else:
+                    symbol = fav_choice.upper().strip()
+                    if symbol in favorites:
+                        self._run_single_stock_analysis(symbol)
+                        self._pause()
+                    else:
+                        self.console.print(
+                            f"[red]❌ {symbol} not found in favorites.[/red]"
+                        )
+                        self._pause()
 
             elif choice == "5":
                 favorites = load_favorites()
@@ -376,30 +475,30 @@ class InteractiveCLI:
                     self.console.print(
                         f"[red]Error occurred during analysis: {e}[/red]"
                     )
+                self._pause()
 
     def _handle_portfolio_management(self) -> None:
         """Handle portfolio management menu (CLI only)."""
         while True:
-            self.console.print()
-            self.console.print(
-                Panel.fit(
-                    "[bold cyan]📊 Portfolio Management[/bold cyan]\n\n"
-                    "1. [green]List Positions[/green]\n"
-                    "2. [green]Add Position[/green]\n"
-                    "3. [green]Remove Position[/green]\n"
-                    "4. [green]Portfolio Summary (P/L)[/green]\n"
-                    "5. [green]Risk Cockpit[/green]\n"
-                    "6. [green]Alert Center[/green]\n"
-                    "7. [green]Create Price Alert[/green]\n"
-                    "0. [yellow]Go Back[/yellow]",
-                    title="Portfolio Menu",
-                    border_style="cyan",
-                )
+            options: Dict[str, tuple[str, Callable[[], None]]] = {
+                "1": ("List positions", lambda: list_positions(self.console)),
+                "2": ("Add position", lambda: None),
+                "3": ("Remove position", lambda: None),
+                "4": ("Portfolio summary (P/L)", lambda: None),
+                "5": ("Risk cockpit", lambda: None),
+                "6": ("Alert center", lambda: None),
+                "7": ("Create price alert", lambda: None),
+                "0": ("Go back", lambda: None),
+            }
+            self._render_simple_menu(
+                "📊 Portfolio Management",
+                options,
+                subtitle="Review holdings, inspect risk, and manage alerts from one place.",
             )
 
             choice = Prompt.ask(
-                "Choice",
-                choices=["1", "2", "3", "4", "5", "6", "7", "0"],
+                "[cyan]Choice[/cyan]",
+                choices=list(options.keys()),
                 default="1",
                 show_choices=False,
             )
@@ -408,7 +507,7 @@ class InteractiveCLI:
                 break
             if choice == "1":
                 list_positions(self.console)
-                Prompt.ask("\nPress Enter to continue")
+                self._pause()
                 continue
 
             if choice == "2":
@@ -433,6 +532,7 @@ class InteractiveCLI:
                     self.console.print(f"[green]✅ Position saved: {symbol}[/green]")
                 else:
                     self.console.print(f"[red]❌ {message}[/red]")
+                self._pause()
                 continue
 
             if choice == "3":
@@ -443,26 +543,27 @@ class InteractiveCLI:
                     self.console.print(f"[green]🗑️ Removed: {symbol}[/green]")
                 else:
                     self.console.print(f"[red]❌ Position not found: {symbol}[/red]")
+                self._pause()
                 continue
 
             if choice == "4":
                 render_portfolio_snapshot(self.console, self.config)
-                Prompt.ask("\nPress Enter to continue")
+                self._pause()
                 continue
 
             if choice == "5":
                 render_portfolio_risk_cockpit(self.console, self.config)
-                Prompt.ask("\nPress Enter to continue")
+                self._pause()
                 continue
 
             if choice == "6":
                 render_alert_center(self.console)
-                Prompt.ask("\nPress Enter to continue")
+                self._pause()
                 continue
 
             if choice == "7":
                 prompt_and_create_price_alert(self.console)
-                Prompt.ask("\nPress Enter to continue")
+                self._pause()
 
     def _handle_edit_config(self) -> None:
         """Open settings.py in default editor."""
@@ -796,17 +897,14 @@ class InteractiveCLI:
         }
 
         while True:
-            table = Table(
-                title="History", show_header=True, header_style="bold magenta"
+            self._render_simple_menu(
+                "📚 History",
+                options,
+                subtitle="Open past analyses, filter by symbol, or jump straight to a saved report.",
             )
-            table.add_column("#", style="cyan", justify="center")
-            table.add_column("Action", style="green")
-            for key, (label, _) in options.items():
-                table.add_row(key, label)
-            self.console.print(table)
 
             choice = Prompt.ask(
-                "Choice",
+                "[cyan]Choice[/cyan]",
                 choices=list(options.keys()),
                 default="0",
                 show_choices=False,
@@ -879,17 +977,14 @@ class InteractiveCLI:
         }
 
         while True:
-            table = Table(
-                title="Configuration", show_header=True, header_style="bold magenta"
+            self._render_simple_menu(
+                "⚙️ Configuration",
+                options,
+                subtitle="Inspect active settings and validate the environment before running analyses.",
             )
-            table.add_column("#", style="cyan", justify="center")
-            table.add_column("Action", style="green")
-            for key, (label, _) in options.items():
-                table.add_row(key, label)
-            self.console.print(table)
 
             choice = Prompt.ask(
-                "Choice",
+                "[cyan]Choice[/cyan]",
                 choices=list(options.keys()),
                 default="0",
                 show_choices=False,
@@ -928,17 +1023,14 @@ class InteractiveCLI:
         }
 
         while True:
-            table = Table(
-                title="Settings", show_header=True, header_style="bold magenta"
+            self._render_simple_menu(
+                "⚙️ Settings",
+                options,
+                subtitle="Tweak configuration, proxies, and investor profile preferences.",
             )
-            table.add_column("#", style="cyan", justify="center")
-            table.add_column("Action", style="green")
-            for key, (label, _) in options.items():
-                table.add_row(key, label)
-            self.console.print(table)
 
             choice = Prompt.ask(
-                "Choice",
+                "[cyan]Choice[/cyan]",
                 choices=list(options.keys()),
                 default="0",
                 show_choices=False,
@@ -952,21 +1044,20 @@ class InteractiveCLI:
 
     def _handle_investor_profile_menu(self) -> None:
         while True:
-            table = Table(
-                title="Investor Profile",
-                show_header=True,
-                header_style="bold magenta",
+            options: Dict[str, tuple[str, Callable[[], None]]] = {
+                "1": ("Show active profile", lambda: None),
+                "2": ("Edit active profile", lambda: None),
+                "0": ("Go Back", lambda: None),
+            }
+            self._render_simple_menu(
+                "👤 Investor Profile",
+                options,
+                subtitle="Tune the profile used to personalize recommendations and risk framing.",
             )
-            table.add_column("#", style="cyan", justify="center")
-            table.add_column("Action", style="green")
-            table.add_row("1", "Show active profile")
-            table.add_row("2", "Edit active profile")
-            table.add_row("0", "Go Back")
-            self.console.print(table)
 
             choice = Prompt.ask(
-                "Choice",
-                choices=["1", "2", "0"],
+                "[cyan]Choice[/cyan]",
+                choices=list(options.keys()),
                 default="0",
                 show_choices=False,
             )
@@ -975,10 +1066,10 @@ class InteractiveCLI:
                 return
             if choice == "1":
                 show_investor_profile(self.console)
-                Prompt.ask("\nPress Enter to continue")
+                self._pause()
             elif choice == "2":
                 edit_investor_profile(self.console)
-                Prompt.ask("\nPress Enter to continue")
+                self._pause()
 
     # ------------------------------------------------------------------
     # Prompt helpers

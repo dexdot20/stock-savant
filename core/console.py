@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import re
 import sys
 import threading
@@ -9,11 +10,20 @@ from typing import TextIO
 
 from rich.console import Console
 
+from config import get_config
 from .paths import get_runtime_dir
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 _TRANSCRIPT_PATH = get_runtime_dir() / "terminal.txt"
 _TRANSCRIPT_LOCK = threading.Lock()
+_TRANSCRIPT_STREAMS: list["TerminalTranscriptStream"] = []
+
+
+def _is_terminal_debug_enabled() -> bool:
+	try:
+		return bool(get_config().get("terminal_debug", True))
+	except Exception:
+		return True
 
 
 def _strip_ansi(text: str) -> str:
@@ -30,6 +40,7 @@ class TerminalTranscriptStream:
 		self._transcript_path = transcript_path
 		self._buffer = ""
 		self._write_session_header()
+		_TRANSCRIPT_STREAMS.append(self)
 
 	def write(self, text: str) -> int:
 		if not text:
@@ -38,7 +49,12 @@ class TerminalTranscriptStream:
 		self._stream.write(text)
 		self._stream.flush()
 
-		clean_text = _strip_ansi(text).replace("\r", "\n")
+		clean_text = _strip_ansi(text).replace("\r\n", "\n")
+		if "\r" in clean_text and "\n" not in clean_text:
+			return len(text)
+		if "\r" in clean_text:
+			clean_text = "\n".join(part.rsplit("\r", 1)[-1] for part in clean_text.split("\n"))
+
 		with _TRANSCRIPT_LOCK:
 			self._buffer += clean_text
 			self._flush_complete_lines()
@@ -47,6 +63,8 @@ class TerminalTranscriptStream:
 
 	def flush(self) -> None:
 		self._stream.flush()
+
+	def finalize(self) -> None:
 		with _TRANSCRIPT_LOCK:
 			if self._buffer:
 				self._write_transcript_line(self._buffer)
@@ -96,11 +114,23 @@ class TerminalTranscriptStream:
 				handle.write("\n")
 
 
-_stdout_transcript = TerminalTranscriptStream(sys.stdout, _TRANSCRIPT_PATH)
-_stderr_transcript = TerminalTranscriptStream(sys.stderr, _TRANSCRIPT_PATH)
-sys.stdout = _stdout_transcript
-sys.stderr = _stderr_transcript
+def _finalize_transcripts() -> None:
+	for stream in list(_TRANSCRIPT_STREAMS):
+		try:
+			stream.finalize()
+		except Exception:
+			pass
 
-# Singleton console instance to be used throughout the application.
-# This ensures logging, progress bars, and interactive output share the same terminal state.
-console = Console(file=_stdout_transcript)
+
+if _is_terminal_debug_enabled():
+	_stdout_transcript = TerminalTranscriptStream(sys.stdout, _TRANSCRIPT_PATH)
+	_stderr_transcript = TerminalTranscriptStream(sys.stderr, _TRANSCRIPT_PATH)
+	sys.stdout = _stdout_transcript
+	sys.stderr = _stderr_transcript
+	atexit.register(_finalize_transcripts)
+	# Singleton console instance to be used throughout the application.
+	# This ensures logging, progress bars, and interactive output share the same terminal state.
+	console = Console(file=_stdout_transcript)
+else:
+	console = Console(file=sys.stdout)
+
