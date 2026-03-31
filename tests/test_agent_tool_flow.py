@@ -9,6 +9,7 @@ from services.ai.providers.agent_guardrails import (
     looks_like_bulk_list_fact,
     normalize_tool_args,
     sanitize_memory_args,
+    should_block_bist_yfinance_search,
     validate_tool_args,
 )
 from services.ai.providers.deepseek_provider import (
@@ -81,6 +82,7 @@ class PromptStoreAgentLimitTests(unittest.TestCase):
         self.assertIn("Do NOT write failed fetch attempts", prompt)
         self.assertIn("Use exact tool names and argument names", prompt)
         self.assertIn("Do NOT invent, rename, or simulate unavailable tools", prompt)
+        self.assertIn("For BIST broad discovery, do not start with `yfinance_search`", prompt)
 
 
 class SystemPromptAugmentationTests(unittest.TestCase):
@@ -144,6 +146,25 @@ class AgentGuardrailNormalizationTests(unittest.TestCase):
         )
 
         self.assertIn("unsupported argument(s): foo", error)
+
+    def test_bist_broad_yfinance_search_is_blocked(self) -> None:
+        reason = should_block_bist_yfinance_search(
+            exchange="BIST",
+            query="BIST 100 stocks low price",
+            type_filter="stock",
+        )
+
+        self.assertIsNotNone(reason)
+        self.assertIn("not reliable in yfinance", reason)
+
+    def test_bist_specific_ticker_yfinance_search_is_allowed(self) -> None:
+        reason = should_block_bist_yfinance_search(
+            exchange="BIST",
+            query="FROTO.IS",
+            type_filter="stock",
+        )
+
+        self.assertIsNone(reason)
 
     def test_bulk_list_fact_is_filtered_from_verified_facts(self) -> None:
         args = sanitize_memory_args(

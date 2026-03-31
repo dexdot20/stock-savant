@@ -332,7 +332,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "models": {
             "news": {
                 "provider": "openrouter",
-                "model": "stepfun/step-3.5-flash",
+                "model": "xiaomi/mimo-v2-flash",
                 "fallback_models": {
                     "openrouter": [
                         "openai/gpt-oss-120b",
@@ -350,7 +350,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             },
             "pre_research": {
                 "provider": "openrouter",
-                "model": "stepfun/step-3.5-flash",
+                "model": "xiaomi/mimo-v2-flash",
                 "fallback_models": {
                     "openrouter": [
                         "openai/gpt-oss-120b",
@@ -368,11 +368,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             },
             "summarizer": {
                 "provider": "openrouter",
-                "model": "stepfun/step-3.5-flash:free",
+                "model": "xiaomi/mimo-v2-flash:free",
                 "fallback_models": {
                     "openrouter": [
-                        "nvidia/nemotron-3-super-120b-a12b:free",
                         "mistralai/mistral-nemo",
+                        "qwen/qwen3-235b-a22b-2507",
+                        "z-ai/glm-4-32b",
                     ],
                 },
             },

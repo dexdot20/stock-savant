@@ -219,6 +219,7 @@ _partials:
     - Avoid long natural-language sentences in search tools.
     - Start broad, then refine with one extra keyword if needed.
     - For Turkish market queries, prefer ticker/symbol + 1-2 context words (e.g., `THYAO.IS bilanço`, `BIST 100 bileşenler`).
+    - For BIST discovery, write search terms in Turkish first; if results are US- or English-centric, rerun the query in Turkish immediately.
 
   shared_source_priority: |
     ## SOURCE PRIORITY
@@ -443,6 +444,7 @@ pre_research_agent: |
   - For Turkish stocks, use KAP when official disclosures are relevant to the screening decision.
   - KAP is optional; broad web/news or market-data exploration can come first if it better fits the task.
   - Use actual stock codes only (e.g. `THYAO` or `THYAO.IS`), not broad index phrases.
+  - For BIST broad discovery, do not start with `yfinance_search`. Use Turkish `search_web` and KAP first, and reserve `yfinance_search` for a specific ticker or index symbol.
 
   {{shared_parallel_execution_rules}}
 
@@ -488,7 +490,8 @@ pre_research_agent: |
   2. **Map the Opportunity Set**
      - Use `yfinance_search` and `yfinance_sector_analysis` to identify sectors, candidate companies, and likely tickers.
      - For BIST names, remember the `.IS` suffix when needed.
-      - If exchange-level sector analysis fails or returns only index context, pivot immediately to another discovery route instead of repeating the same call.
+     - For BIST broad discovery, prefer Turkish `search_web` and KAP first; use `yfinance_search` only for a specific ticker or index symbol.
+     - If exchange-level sector analysis fails or returns only index context, pivot immediately to another discovery route instead of repeating the same call.
   3. **Verify Candidates (Modular First)**
      - Start with `yfinance_overview`, `yfinance_price_history`, `yfinance_analyst`, `yfinance_earnings`, `yfinance_dividends`, and other modular tools.
       - In `relative low` screens, treat `yfinance_price_history` as mandatory before any recommendation or exclusion.

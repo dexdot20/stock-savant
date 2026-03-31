@@ -103,6 +103,26 @@ FINAL_REPORT_MARKERS: tuple[str, ...] = (
     "BIST Stock Recommendation Report",
 )
 
+_BIST_CONTEXT_VALUES = {
+    "BIST",
+    "BORSA ISTANBUL",
+    "BORSA İSTANBUL",
+    "IST",
+    "XU100",
+    "XU100.IS",
+    "^XU100",
+}
+
+_BIST_SPECIFIC_QUERY_PATTERN = re.compile(r"^[A-ZÇĞİÖŞÜ]{2,10}\.IS$")
+
+_BIST_BROAD_DISCOVERY_GUIDANCE = (
+    "BIST broad discovery is not reliable in yfinance. Use search_web in Turkish "
+    "or kap_search_disclosures for discovery; reserve yfinance_search for a specific "
+    "ticker such as FROTO.IS or an index symbol such as XU100.IS."
+)
+
+_BIST_INDEX_QUERY_TOKENS = {"XU100", "XU100.IS", "^XU100"}
+
 
 def canonicalize_bist_market_tool_call(tool_call: Dict[str, Any]) -> Dict[str, Any]:
     normalized_call = dict(tool_call or {})
@@ -138,6 +158,52 @@ def canonicalize_bist_market_tool_call(tool_call: Dict[str, Any]) -> Dict[str, A
 
     normalized_call["args"] = normalized_args
     return normalized_call
+
+
+def is_bist_market_context(value: Any) -> bool:
+    normalized = re.sub(r"\s+", " ", str(value or "").strip().upper())
+    return normalized in _BIST_CONTEXT_VALUES
+
+
+def _is_specific_bist_query(query: Any) -> bool:
+    normalized = re.sub(r"\s+", " ", str(query or "").strip().upper())
+    if not normalized:
+        return False
+
+    if normalized in _BIST_CONTEXT_VALUES or normalized in BIST_INDEX_SYMBOL_ALIASES:
+        return True
+
+    for token in normalized.split():
+        cleaned = token.strip(",;:!?()[]{}")
+        if not cleaned:
+            continue
+        if cleaned in _BIST_INDEX_QUERY_TOKENS:
+            return True
+        if cleaned in _BIST_CONTEXT_VALUES:
+            continue
+        if _BIST_SPECIFIC_QUERY_PATTERN.fullmatch(cleaned):
+            return True
+
+    return False
+
+
+def should_block_bist_yfinance_search(
+    *,
+    exchange: Any,
+    query: Any,
+    type_filter: Any = None,
+) -> Optional[str]:
+    if not is_bist_market_context(exchange):
+        return None
+
+    normalized_type = str(type_filter or "").strip().lower()
+    if normalized_type == "index" and _is_specific_bist_query(query):
+        return None
+
+    if _is_specific_bist_query(query):
+        return None
+
+    return _BIST_BROAD_DISCOVERY_GUIDANCE
 
 
 def normalize_tool_args(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:

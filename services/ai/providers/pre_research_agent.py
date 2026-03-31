@@ -40,9 +40,11 @@ from services.ai.providers.agent_guardrails import (
     VERIFIED_MEMORY_TOOLS,
     build_tool_plan_preview,
     canonicalize_bist_market_tool_call,
+    is_bist_market_context,
     get_pre_research_pivot_notice,
     make_tool_signature,
     normalize_tool_args,
+    should_block_bist_yfinance_search,
     validate_tool_args,
 )
 from services.ai.working_memory import WorkingMemory
@@ -558,6 +560,15 @@ class PreResearchAgent(ResearchAgentSupportMixin):
             "Start research, rank all suitable companies you find according to criteria."
         )
 
+        if is_bist_market_context(self._current_exchange):
+            user_message += (
+                "\n\nBIST guidance: use Turkish `search_web` queries first for discovery "
+                "and use KAP when official disclosures matter. Do not use `yfinance_search` "
+                "for broad screening; reserve it for a specific ticker such as `FROTO.IS` or "
+                "an index symbol such as `XU100.IS`. If a web search returns mostly English or "
+                "US-centric results, immediately retry in Turkish."
+            )
+
         if not loaded_state:
             history = [
                 {"role": "system", "content": system_prompt},
@@ -1056,6 +1067,17 @@ class PreResearchAgent(ResearchAgentSupportMixin):
                     tasks.append(self._mock_tool_error(validation_error))
                     param_map.append(tool_meta)
                     continue
+
+                if fn_name == "yfinance_search":
+                    bist_block_reason = should_block_bist_yfinance_search(
+                        exchange=self._current_exchange,
+                        query=fn_args.get("query"),
+                        type_filter=fn_args.get("type_filter"),
+                    )
+                    if bist_block_reason:
+                        tasks.append(self._mock_tool_error(bist_block_reason))
+                        param_map.append(tool_meta)
+                        continue
 
                 # Pre-flight: search_memory requires 'query' or 'hit_ids'.
                 if fn_name == "search_memory":
