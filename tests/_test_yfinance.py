@@ -214,5 +214,5 @@ print(
     f"  RESULT  : \033[92m{passed_total} PASS\033[0m  |  \033[91m{failed_total} FAIL\033[0m  |  \033[90m{skipped_total} SKIP\033[0m  (total {total})"
 )
 if skipped_total:
-    print(f"  Note    : SKIP = known yfinance limitations (scope varies by exchange)")
+    print("  Note    : SKIP = known yfinance limitations (scope varies by exchange)")
 print(f"{'═'*60}\n")

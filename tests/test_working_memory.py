@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 
 from services.ai.providers.agent_guardrails import sanitize_memory_args
 from services.ai.shared_memory_pool import SharedMemoryPool
-from services.ai.working_memory import Fact, WorkingMemory
+from services.ai.working_memory import WorkingMemory
 
 
 class WorkingMemoryAdaptiveTests(unittest.TestCase):
@@ -92,6 +92,8 @@ class CapturingRAGService(FakeRAGService):
         return super().search(**kwargs)
 
     def fetch_hits(self, hit_ids, context_window=0):
+        _ = (hit_ids, context_window)
+
         return [
             {
                 "id": "doc-1",

@@ -12,10 +12,10 @@ class _FakeCacheManager:
         self.last_ttl_cache_kwargs = kwargs
         return self
 
-    def get_many(self, namespace, keys):
+    def get_many(self, _namespace, _keys):
         return {}
 
-    def set_many(self, namespace, values):
+    def set_many(self, _namespace, _values):
         return None
 
 

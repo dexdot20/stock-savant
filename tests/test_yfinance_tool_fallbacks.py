@@ -65,6 +65,7 @@ class FakeFinanceService:
             "region": region,
             "exchange": exchange,
             "sector": sector,
+            "limit": limit,
             "count": 1,
             "quotes": [{"symbol": "EREGL.IS", "longName": "Eregli Demir ve Celik Fabrikalari T.A.S."}],
         }
@@ -120,7 +121,15 @@ class YFinanceFastInfoRegressionTests(unittest.TestCase):
     def test_safe_get_fast_info_skips_currency_key_error(self) -> None:
         class _Harness(YFinanceFetchMixin):
             def __init__(self):
-                self.logger = type("L", (), {"debug": lambda *a, **k: None, "warning": lambda *a, **k: None, "error": lambda *a, **k: None})()
+                self.logger = type(
+                    "L",
+                    (),
+                    {
+                        "debug": lambda *_, **__: None,
+                        "warning": lambda *_, **__: None,
+                        "error": lambda *_, **__: None,
+                    },
+                )()
 
         harness = _Harness()
         data = harness._safe_get_fast_info(_BrokenTicker())

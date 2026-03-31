@@ -329,13 +329,33 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             "fallback_fulltext_chars": 10000,
         },
 
+        # MODEL & PROVIDER SEÇİMİ — açıklama ve örnekler
+        # - Bu bölümdeki `models` öğeleri için `provider` alanı burada tanımladığınız
+        #   sağlayıcı isimlerinden birini işaret eder (ör. "openrouter", "deepseek").
+        # - `fallback_models` ile provider-özgü model yedeklemeleri tanımlanabilir.
+        # - OpenRouter gibi gateway'lerde route/selection parametreleri kullanarak
+        #   isteklerin hangi alt-sağlayıcı(lar)a gideceğini belirleyebilirsiniz.
+        #   Kesin alan isimleri ve davranış için OpenRouter dokümanına bakın:
+        #   https://openrouter.ai/docs/guides/routing/provider-selection
+        # Örnek kullanım:
+        # DEFAULT_CONFIG['ai']['models']['news'] = {
+        #     "provider": "openrouter",
+        #     "model": "x-ai/grok-4.1-fast",
+        #     "fallback_models": {"openrouter": ["minimax/minimax-m2.5"]},
+        #     "routing_overrides": {
+        #         "preferred_providers": ["openai", "x-ai"],
+        #         "force_provider": None,
+        #     },
+        # }
+        #
+        # Not: API anahtarlarını doğrudan buraya koymayın — ortam değişkenlerini kullanın.
         "models": {
             "news": {
                 "provider": "openrouter",
-                "model": "xiaomi/mimo-v2-flash",
+                "model": "x-ai/grok-4.1-fast",
                 "fallback_models": {
                     "openrouter": [
-                        "openai/gpt-oss-120b",
+                        "minimax/minimax-m2.5",
                     ],
                 },
             },
@@ -350,10 +370,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             },
             "pre_research": {
                 "provider": "openrouter",
-                "model": "xiaomi/mimo-v2-flash",
+                "model": "x-ai/grok-4.1-fast",
                 "fallback_models": {
                     "openrouter": [
-                        "openai/gpt-oss-120b",
+                        "minimax/minimax-m2.5",
                     ],
                 },
             },
@@ -368,17 +388,41 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             },
             "summarizer": {
                 "provider": "openrouter",
-                "model": "xiaomi/mimo-v2-flash:free",
+                "model": "openai/gpt-oss-120b",
                 "fallback_models": {
                     "openrouter": [
-                        "mistralai/mistral-nemo",
-                        "qwen/qwen3-235b-a22b-2507",
-                        "z-ai/glm-4-32b",
+                        "xiaomi/mimo-v2-flash",
+                        "z-ai/glm-4.7-flash",
                     ],
                 },
             },
         },
 
+        # PROVIDER YAPILANDIRMA BÖLÜMÜ (örnekler ve açıklamalar)
+        # - Her provider girdisi kimlik doğrulama bilgileri (`api_key`), `base_url`,
+        #   `default_model` ve isteğe bağlı yapılandırma (timeout, retry_policy, routing)
+        #   içermelidir.
+        # - OpenRouter kullanıyorsanız burada `routing` veya `provider_selection` benzeri
+        #   alanlarla tercihlerinizi belirtebilirsiniz. Uygulamanın HTTP katmanı bu
+        #   alanları OpenRouter istek gövdesine maplemelidir.
+        # - `prompt_caching.preserve_sticky_routing` True ise cache uyumu için aynı
+        #   provider seçimi korunur.
+        # Örnek (detaylı):
+        # "openrouter": {
+        #     "api_key": _get_env_str("OPENROUTER_API_KEY"),
+        #     "base_url": "https://openrouter.ai/api/v1",
+        #     "default_model": "x-ai/grok-4.1-fast",
+        #     "timeout_seconds": 30,
+        #     "retry_policy": {"max_attempts": 3, "initial_delay": 0.5, "backoff_factor": 2.0},
+        #     "routing": {
+        #         "strategy": "preferred",  # "preferred" | "force" | "fallback"
+        #         "preferred_providers": ["openai", "x-ai"],
+        #         "fallback_order": ["openai", "anthropic"],
+        #         "force_provider": None,
+        #     },
+        #     "model_map": {"chat": "gpt-4o-mini", "reasoning": "grok-4.1-fast"},
+        #     "prompt_caching": {"enabled": True, "preserve_sticky_routing": True},
+        # },
         "providers": {
             "deepseek": {
                 "api_key": _get_env_str("DEEPSEEK_API_KEY"),
@@ -432,6 +476,45 @@ DEFAULT_CONFIG: Dict[str, Any] = {
                     "enabled": True,
                     "preserve_sticky_routing": True,
                     "log_usage": True,
+                },
+                # OpenRouter için varsayılan routing seçenekleri.
+                # Bu yapı, uygulama tarafından OpenRouter'ın `provider` parametresine
+                # çevrilip istek gövdesine eklenmelidir. Aşağıdaki alanlar OpenRouter
+                # dokümanındaki `provider` objesiyle eşleşir (bkz. provider-selection).
+                # Yorum satırlarında gerçek dünya örnekleri gösterilmiştir.
+                #
+                # Örnek provider objesi (istek başına gönderilecek):
+                # provider_override = {
+                #     "order": ["openai", "anthropic"],
+                #     "allow_fallbacks": True,
+                #     "require_parameters": False,
+                #     "data_collection": "deny",  # only use ZDR/non-training endpoints
+                #     "zdr": True,
+                #     "only": ["azure"],
+                #     "ignore": ["deepinfra"],
+                #     "quantizations": ["fp8"],
+                #     "sort": {"by": "throughput", "partition": "none"},
+                #     "preferred_min_throughput": {"p90": 50},
+                #     "preferred_max_latency": {"p90": 3},
+                #     "max_price": {"prompt": 1.0, "completion": 2.0},
+                # }
+                #
+                # Basit varsayılanlar (uygulama bu değerleri ihtiyaç halinde açıktan
+                # üzerine yazmalıdır):
+                "routing_defaults": {
+                    "order": [],
+                    "allow_fallbacks": True,
+                    "require_parameters": False,
+                    "data_collection": "allow",
+                    "zdr": False,
+                    # Varsayılan olarak OpenRouter isteklerini throughput'a
+                    # öncelik verecek şekilde ayarlıyoruz. Bu, OpenRouter'ın
+                    # sağlayıcı sıralamasını "throughput" bazlı yapar ve
+                    # global en yüksek throughput'u seçmeye çalışır.
+                    # Partition: "none" seçimi, tüm modeller arasındaki
+                    # endpoint'leri throughput'a göre karşılaştırır (model
+                    # gruplaması yapılmaz).
+                    "sort": {"by": "throughput", "partition": "none"},
                 },
             },
         },

@@ -66,7 +66,7 @@ def test_kap_detail_tool_returns_serialized_detail(monkeypatch) -> None:
 def test_kap_batch_tool_returns_results_and_errors(monkeypatch) -> None:
     monkeypatch.setattr(
         "services.tools.batch_get_disclosure_details",
-        lambda disclosure_indexes, max_workers: (
+        lambda disclosure_indexes, *_: (
             [
                 DisclosureDetail.model_validate(
                     {
@@ -76,8 +76,7 @@ def test_kap_batch_tool_returns_results_and_errors(monkeypatch) -> None:
                         "disclosureClass": "FR",
                         "publishDate": "19.02.2026 10:00:00",
                     }
-                )
-                ,
+                ),
                 None,
             ],
             {disclosure_indexes[-1]: "boom"},

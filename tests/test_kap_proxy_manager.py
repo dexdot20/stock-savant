@@ -7,8 +7,6 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from services.kap.proxy_manager import ProxyManager, fetch_with_retry
 
 
@@ -192,7 +190,7 @@ class TestFetchWithRetry:
             mock_client.__enter__ = MagicMock(return_value=mock_client)
             mock_client.__exit__ = MagicMock(return_value=False)
 
-            def fake_get(url, **kw):
+            def fake_get(*args, **kwargs):
                 nonlocal call_count
                 call_count += 1
                 if call_count == 1:

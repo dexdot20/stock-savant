@@ -6,8 +6,6 @@ from __future__ import annotations
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from services.kap.proxy_manager import ProxyManager
 from services.kap.scraper.detail_parser import (
     _extract_json_array,

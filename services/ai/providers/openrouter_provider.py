@@ -577,22 +577,71 @@ def _prepare_openrouter_payload(
         else:
             payload["cache_control"] = cache_control
 
-    provider_preferences = kwargs.get("provider")
-    if not isinstance(provider_preferences, dict):
-        provider_preferences = provider_cfg.get("provider")
-    if isinstance(provider_preferences, dict) and provider_preferences:
-        if (
-            prompt_caching_enabled
-            and prompt_caching_cfg.get("preserve_sticky_routing", True)
-            and "order" in provider_preferences
-        ):
-            provider_preferences = {
-                key: value
-                for key, value in provider_preferences.items()
-                if key != "order"
-            }
-        if provider_preferences:
-            payload["provider"] = provider_preferences
+    # Resolve provider routing/preferences
+    # Priority (highest -> lowest): explicit `provider` in kwargs,
+    # `provider_order_override` in kwargs (from ProviderManager),
+    # provider-specific `provider` config in providers_cfg,
+    # plus optional `routing_defaults` defined per-provider in settings.
+    provider_preferences: Dict[str, Any] = {}
+
+    # routing defaults (base defaults that can be overridden)
+    routing_defaults = provider_cfg.get("routing_defaults") or {}
+    if isinstance(routing_defaults, dict):
+        base_defaults = dict(routing_defaults)
+    else:
+        base_defaults = {}
+
+    # start from the configured provider preferences (lowest-priority)
+    cfg_provider_pref = provider_cfg.get("provider")
+    if isinstance(cfg_provider_pref, dict):
+        provider_preferences.update(cfg_provider_pref)
+
+    # ProviderManager may pass a `provider_order_override` keyword to indicate
+    # an ordered list (or comma-separated string) of provider slugs to try.
+    # Map that into the OpenRouter `provider.order` field when present.
+    # This is applied *before* explicit per-request `provider` kwargs so that
+    # explicit `provider` in kwargs remains the highest-priority override.
+    provider_order_override = kwargs.get("provider_order_override")
+    if provider_order_override is not None:
+        order_list: list[str] = []
+        if isinstance(provider_order_override, str):
+            order_list = [p.strip() for p in provider_order_override.split(",") if p.strip()]
+        elif isinstance(provider_order_override, (list, tuple)):
+            order_list = [str(p).strip() for p in provider_order_override if str(p).strip()]
+        elif isinstance(provider_order_override, dict) and "order" in provider_order_override:
+            maybe = provider_order_override.get("order")
+            if isinstance(maybe, (list, tuple)):
+                order_list = [str(p).strip() for p in maybe if str(p).strip()]
+            elif isinstance(maybe, str):
+                order_list = [p.strip() for p in maybe.split(",") if p.strip()]
+
+        if order_list:
+            provider_preferences["order"] = order_list
+
+    # apply an explicit provider dict passed in kwargs (highest priority)
+    explicit_provider = kwargs.get("provider")
+    if isinstance(explicit_provider, dict):
+        provider_preferences.update(explicit_provider)
+
+    # Merge base routing defaults under explicit preferences (defaults win only when key missing)
+    final_provider_preferences: Dict[str, Any] = dict(base_defaults)
+    final_provider_preferences.update(provider_preferences)
+
+    # Respect sticky-routing rules used for prompt-caching: when enabled, manual
+    # `order` should be removed so the cache's routing choice is preserved.
+    if (
+        prompt_caching_enabled
+        and prompt_caching_cfg.get("preserve_sticky_routing", True)
+        and "order" in final_provider_preferences
+    ):
+        final_provider_preferences = {
+            key: value
+            for key, value in final_provider_preferences.items()
+            if key != "order"
+        }
+
+    if final_provider_preferences:
+        payload["provider"] = final_provider_preferences
 
     for key in ("tools", "tool_choice", "parallel_tool_calls"):
         value = kwargs.get(key)
