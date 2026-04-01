@@ -263,10 +263,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         },
 
         "agent_steps": {
-            "news": 35,
-            "pre_research": 35,
+            "news": 30,
+            "pre_research": 15,
             "pre_research_depth_mode": "standard",
-            "comparison": 75,
+            "comparison": 30,
             "continuation_increment": 10,
         },
 
@@ -354,8 +354,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
                 "provider": "openrouter",
                 "model": "x-ai/grok-4.1-fast",
                 "fallback_models": {
-                    "openrouter": [
+                  "openrouter": [
                         "minimax/minimax-m2.5",
+                        "minimax/minimax-m2.7",
+                        "x-ai/grok-4.1-fast",
                     ],
                 },
             },
@@ -374,6 +376,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
                 "fallback_models": {
                     "openrouter": [
                         "minimax/minimax-m2.5",
+                        "minimax/minimax-m2.7",
+                        "x-ai/grok-4.1-fast",
                     ],
                 },
             },
