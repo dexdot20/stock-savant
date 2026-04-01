@@ -549,6 +549,34 @@ class ReasoningUxTests(unittest.TestCase):
 
 
 class PreResearchAgentAdaptiveFetchTests(unittest.TestCase):
+    def test_step_timeout_uses_network_timeout(self) -> None:
+        config = {
+            "network": {"request_timeout_seconds": 37},
+            "ai": {
+                "output_language": "English",
+                "agent_steps": {},
+                "agent_reflection": {},
+                "summarizer_settings": {},
+                "working_memory": {},
+                "rag": {"enabled": False},
+            },
+        }
+
+        with patch(
+            "services.ai.providers.pre_research_agent.get_config",
+            return_value=config,
+        ), patch(
+            "services.ai.providers.pre_research_agent.get_shared_memory_pool",
+            return_value=None,
+        ):
+            agent = PreResearchAgent(
+                logging.getLogger("pre-research-timeout-test"),
+                lambda key: "",
+                AsyncMock(),
+            )
+
+        self.assertEqual(agent._step_request_timeout, 37.0)
+
     def _build_agent(self) -> PreResearchAgent:
         agent = PreResearchAgent.__new__(PreResearchAgent)
         agent.logger = logging.getLogger("pre-research-adaptive-test")

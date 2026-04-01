@@ -98,6 +98,12 @@ class PreResearchAgent(ResearchAgentSupportMixin):
         self._summarizer_timeout = _safe_int(
             summarizer_cfg.get("summarizer_timeout_seconds", 60), 60
         )
+        network_cfg = config.get("network", {})
+        self._step_request_timeout = float(
+            network_cfg.get("request_timeout_seconds", 45) or 45
+        )
+        if self._step_request_timeout <= 0:
+            self._step_request_timeout = 45.0
 
         working_memory_cfg = config.get("ai", {}).get("working_memory", {})
         shared_pool = (
@@ -969,6 +975,11 @@ class PreResearchAgent(ResearchAgentSupportMixin):
             console=console,
         )
 
+        if console:
+            console.print(
+                f"[dim]🧠 Pre-research planning is running with a {self._step_request_timeout:.0f}s AI timeout.[/dim]"
+            )
+
         today = datetime.now().strftime("%d %B %Y")
         try:
             system_prompt = self._prompt_resolver("pre_research_agent")
@@ -1057,11 +1068,16 @@ class PreResearchAgent(ResearchAgentSupportMixin):
             # elif total_chars > self._history_char_limit:
             #    history = await self._summarize_history(history)
 
+            if console:
+                console.print(
+                    f"[dim]🧠 Pre-Research Step {step}/{self.max_steps}: requesting AI plan...[/dim]"
+                )
+
             try:
                 response = await self._request_executor.send_async(
                     history,
                     request_type="pre_research",
-                    timeout_override=120,
+                    timeout_override=self._step_request_timeout,
                     console=console,
                     **tool_request_kwargs,
                 )
