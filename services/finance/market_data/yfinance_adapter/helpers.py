@@ -13,6 +13,94 @@ class YFinanceHelperMixin:
     """Shared helper methods used across YFinance adapter mixins."""
 
     @staticmethod
+    def _calculate_technical_indicators(history) -> Dict[str, Any]:
+        try:
+            if history is None or history.empty:
+                return {}
+            close_prices = history["Close"] if "Close" in history else history.iloc[:, 0]
+            close_prices = close_prices.dropna()
+        except Exception:
+            return {}
+
+        if close_prices.empty:
+            return {}
+
+        indicators: Dict[str, Any] = {}
+
+        try:
+            if len(close_prices) >= 50:
+                ma50 = float(close_prices.tail(50).mean())
+                if YFinanceHelperMixin._is_finite_number(ma50):
+                    indicators["ma50"] = ma50
+
+            if len(close_prices) >= 200:
+                ma200 = float(close_prices.tail(200).mean())
+                if YFinanceHelperMixin._is_finite_number(ma200):
+                    indicators["ma200"] = ma200
+
+            if len(close_prices) >= 15:
+                delta = close_prices.diff()
+                up = delta.where(delta > 0, 0.0)
+                down = -delta.where(delta < 0, 0.0)
+                ma_up = up.ewm(com=13, adjust=False, min_periods=14).mean()
+                ma_down = down.ewm(com=13, adjust=False, min_periods=14).mean()
+                rs = ma_up / ma_down
+                rsi = float((100 - (100 / (1 + rs))).iloc[-1])
+                if YFinanceHelperMixin._is_finite_number(rsi):
+                    indicators["rsi"] = rsi
+
+            if len(close_prices) >= 26:
+                ema12 = close_prices.ewm(span=12, adjust=False, min_periods=12).mean()
+                ema26 = close_prices.ewm(span=26, adjust=False, min_periods=26).mean()
+                macd_series = ema12 - ema26
+                signal_series = macd_series.ewm(span=9, adjust=False, min_periods=9).mean()
+                macd = float(macd_series.iloc[-1])
+                macd_signal = float(signal_series.iloc[-1])
+                macd_histogram = float(macd - macd_signal)
+                if YFinanceHelperMixin._is_finite_number(macd):
+                    indicators["macd"] = macd
+                if YFinanceHelperMixin._is_finite_number(macd_signal):
+                    indicators["macdSignal"] = macd_signal
+                if YFinanceHelperMixin._is_finite_number(macd_histogram):
+                    indicators["macdHistogram"] = macd_histogram
+
+            lookback = min(len(close_prices), 20)
+            if lookback >= 5:
+                high_series = history["High"] if "High" in history else close_prices
+                low_series = history["Low"] if "Low" in history else close_prices
+                high_series = high_series.dropna()
+                low_series = low_series.dropna()
+                last_close = float(close_prices.iloc[-1])
+                support = float(low_series.tail(lookback).min())
+                resistance = float(high_series.tail(lookback).max())
+                if YFinanceHelperMixin._is_finite_number(support):
+                    indicators["supportLevel"] = support
+                if YFinanceHelperMixin._is_finite_number(resistance):
+                    indicators["resistanceLevel"] = resistance
+                if "supportLevel" in indicators or "resistanceLevel" in indicators:
+                    indicators["supportResistanceWindow"] = int(lookback)
+                if (
+                    "supportLevel" in indicators
+                    and indicators["supportLevel"] not in (None, 0)
+                    and YFinanceHelperMixin._is_finite_number(last_close)
+                ):
+                    indicators["distanceToSupportPct"] = (
+                        (last_close - indicators["supportLevel"]) / indicators["supportLevel"]
+                    ) * 100
+                if (
+                    "resistanceLevel" in indicators
+                    and last_close not in (None, 0)
+                    and YFinanceHelperMixin._is_finite_number(last_close)
+                ):
+                    indicators["distanceToResistancePct"] = (
+                        (indicators["resistanceLevel"] - last_close) / last_close
+                    ) * 100
+        except Exception:
+            return indicators
+
+        return indicators
+
+    @staticmethod
     def _pick_first(*values: Any) -> Any:
         for value in values:
             if value not in (None, NA_VALUE, ""):
@@ -134,7 +222,7 @@ class YFinanceHelperMixin:
             except Exception:
                 series = []
 
-            return {
+            summary = {
                 "dataPoints": int(close.shape[0]),
                 "periodHigh": high if high is not None else NA_VALUE,
                 "periodLow": low if low is not None else NA_VALUE,
@@ -152,6 +240,12 @@ class YFinanceHelperMixin:
                 "isNearPeriodLow": is_near_period_low,
                 "series": series,
             }
+            technical_indicators = YFinanceHelperMixin._calculate_technical_indicators(
+                history
+            )
+            if technical_indicators:
+                summary["technicalIndicators"] = technical_indicators
+            return summary
         except Exception:
             return {"dataPoints": 0}
 

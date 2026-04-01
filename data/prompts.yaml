@@ -464,10 +464,12 @@ pre_research_agent: |
   - Treat a stock as at a relative low only if it is near the lower end of its recent range (preferably the lower quartile of the 6M or 52W range).
   - For every shortlisted candidate in a `relative low`, `dip`, `oversold`, or similar query, you MUST call `yfinance_price_history` before deciding whether it qualifies. Do NOT judge `relative low` from `yfinance_overview` alone.
   - If the current price is around the midpoint or upper half of the recent range, it does NOT satisfy the `relative low` criterion.
+  - Runtime guardrails may block `finish` on a `relative low` screen until at least one `yfinance_price_history` result has been collected and interpreted.
   - Do not recommend a stock that fails the user's core criterion just because analyst upside is high.
 
   ## TOOL FAILURE / FALLBACK RULE
   - If a tool returns `mode=index_fallback`, empty results, or a validation-style error for the same objective, switch tool families on the next step instead of retrying the same pattern.
+  - If 2 consecutive search/fetch attempts from the same discovery family return empty, boilerplate, or low-signal results, pivot immediately to another tool family instead of repeating the same source pattern.
   - For exchange-level BIST mapping, prefer exchange / sector screening results when available; use index snapshots for market context, not as a substitute for stock discovery.
   - Do NOT spend a parallel slot on `update_working_memory` unless you are preserving verified findings you just collected.
 

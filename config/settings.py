@@ -186,6 +186,25 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             "max_reports_per_process": 200,
             "dedupe_window": 50,
         },
+        "pre_research": {
+            "request_timeout_seconds": 45,
+            "discovery_request_timeout_seconds": 60,
+            "fetch_dedupe_window_hours": 24,
+            "discovery_pivot_weak_result_streak": 2,
+            "finish_requirements": {
+                "min_steps": 2,
+                "min_non_memory_tools": 3,
+                "min_memory_updates": 2,
+                "min_distinct_tool_names": 2,
+                "min_price_history_calls_for_relative_low": 1,
+            },
+            "adaptive_digest": {
+                "enabled": True,
+                "simple_threshold_chars": 3000,
+                "complex_threshold_chars": 15000,
+                "pruned_target_chars": 7000,
+            },
+        },
 
         # Tool output truncation keeps the agent context window healthy.
         "tool_output": {

@@ -297,49 +297,32 @@ class YFinanceFetchMixin:
             if action_cols:
                 price_history = price_history.drop(columns=action_cols)
 
+        candles_summary = self._summarize_history(price_history)
         result: Dict[str, Any] = {
             "period": period,
             "interval": interval,
-            "candles": self._summarize_history(price_history),
+            "candles": candles_summary,
         }
         history_metadata = self._get_history_metadata(ticker_obj)
         if history_metadata:
             result["historyMetadata"] = history_metadata
 
-        # Teknik göstergeler (sadece günlük/haftalık aralıklarda anlamlı)
-        if "Close" in price_history.columns:
-            close_prices = price_history["Close"]
-
-            if interval in ("1d", "5d", "1wk", "1mo", "3mo"):
-                if len(close_prices) >= 50:
-                    ma50_values = close_prices.iloc[-50:].dropna()
-                    if len(ma50_values) > 0:
-                        ma50 = float(ma50_values.mean())
-                        if not (ma50 != ma50 or ma50 == float("inf")):
-                            result["ma50"] = ma50
-
-                if len(close_prices) >= 200:
-                    ma200_values = close_prices.iloc[-200:].dropna()
-                    if len(ma200_values) > 0:
-                        ma200 = float(ma200_values.mean())
-                        if not (ma200 != ma200 or ma200 == float("inf")):
-                            result["ma200"] = ma200
-
-            if len(close_prices) >= 15:
-                try:
-                    delta = close_prices.diff()
-                    up = delta.where(delta > 0, 0.0)
-                    down = -delta.where(delta < 0, 0.0)
-                    ma_up = up.ewm(com=13, adjust=False, min_periods=14).mean()
-                    ma_down = down.ewm(com=13, adjust=False, min_periods=14).mean()
-                    rs = ma_up / ma_down
-                    rsi_val = float((100 - (100 / (1 + rs))).iloc[-1])
-                    if not (rsi_val != rsi_val or rsi_val == float("inf")):
-                        result["rsi"] = rsi_val
-                except Exception as rsi_exc:
-                    self.logger.debug(
-                        "RSI calculation failed (%s): %s", ticker, rsi_exc
-                    )
+        technical_indicators = candles_summary.get("technicalIndicators", {})
+        if technical_indicators:
+            result["technicalIndicators"] = technical_indicators
+            for key in (
+                "ma50",
+                "ma200",
+                "rsi",
+                "macd",
+                "macdSignal",
+                "macdHistogram",
+                "supportLevel",
+                "resistanceLevel",
+            ):
+                value = technical_indicators.get(key)
+                if value not in (None, NA_VALUE, ""):
+                    result[key] = value
 
         return result
 
@@ -985,68 +968,30 @@ class YFinanceFetchMixin:
                 else:
                     raise history_exc
 
-            data["priceHistory"] = self._summarize_history(price_history)
+            price_history_summary = self._summarize_history(price_history)
+            data["priceHistory"] = price_history_summary
             history_metadata = self._get_history_metadata(ticker_obj)
             if history_metadata:
                 data["priceHistoryMetadata"] = history_metadata
 
-            # Calculate 50-day and 200-day moving averages from price history
-            try:
-                if (
-                    price_history is not None
-                    and not price_history.empty
-                    and "Close" in price_history.columns
+            technical_indicators = price_history_summary.get("technicalIndicators", {})
+            if technical_indicators:
+                data["technicalIndicators"] = technical_indicators
+                if technical_indicators.get("ma50") not in (None, NA_VALUE, ""):
+                    data["fiftyDayAverage"] = technical_indicators["ma50"]
+                if technical_indicators.get("ma200") not in (None, NA_VALUE, ""):
+                    data["twoHundredDayAverage"] = technical_indicators["ma200"]
+                for key in (
+                    "rsi",
+                    "macd",
+                    "macdSignal",
+                    "macdHistogram",
+                    "supportLevel",
+                    "resistanceLevel",
                 ):
-                    close_prices = price_history["Close"]
-
-                    # 50-day MA - son 50 gün ortalaması
-                    if len(close_prices) >= 50:
-                        ma50_values = close_prices.iloc[-50:].dropna()
-                        if len(ma50_values) > 0:
-                            ma50 = float(ma50_values.mean())
-                            if not (
-                                ma50 != ma50 or ma50 == float("inf")
-                            ):  # Check for NaN and inf
-                                data["fiftyDayAverage"] = ma50
-
-                    # 200-day MA - son 200 gün ortalaması
-                    if len(close_prices) >= 200:
-                        ma200_values = close_prices.iloc[-200:].dropna()
-                        if len(ma200_values) > 0:
-                            ma200 = float(ma200_values.mean())
-                            if not (
-                                ma200 != ma200 or ma200 == float("inf")
-                            ):  # Check for NaN and inf
-                                data["twoHundredDayAverage"] = ma200
-
-                    # RSI (14-period) - Wilder's Smoothing
-                    if len(close_prices) >= 15:
-                        delta = close_prices.diff()
-
-                        # Calculate gains and losses
-                        up = delta.where(delta > 0, 0.0)
-                        down = -delta.where(delta < 0, 0.0)
-
-                        # Use Exponential Moving Average with com=13 (alpha=1/14)
-                        # This matches the standard Wilder's RSI calculation used by TradingView/Finviz
-                        ma_up = up.ewm(com=13, adjust=False, min_periods=14).mean()
-                        ma_down = down.ewm(com=13, adjust=False, min_periods=14).mean()
-
-                        rs = ma_up / ma_down
-                        rsi_series = 100 - (100 / (1 + rs))
-
-                        rsi = rsi_series.iloc[-1]
-
-                        if not (
-                            rsi != rsi or rsi == float("inf")
-                        ):  # Check for NaN and inf
-                            data["rsi"] = float(rsi)
-            except Exception as indicator_exc:
-                self.logger.debug(
-                    "Technical indicator calculation failed (%s): %s",
-                    ticker,
-                    indicator_exc,
-                )
+                    value = technical_indicators.get(key)
+                    if value not in (None, NA_VALUE, ""):
+                        data[key] = value
         except Exception as exc:
             self.logger.debug("Price history could not be retrieved (%s): %s", ticker, exc)
 

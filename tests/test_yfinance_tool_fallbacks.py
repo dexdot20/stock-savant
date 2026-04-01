@@ -58,6 +58,27 @@ class YFinanceHistorySummaryTests(unittest.TestCase):
         self.assertAlmostEqual(summary["distanceFromHighPct"], (14.0 - 11.0) / 14.0 * 100)
         self.assertTrue(summary["isNearPeriodLow"])
 
+    def test_summarize_history_adds_technical_indicators(self) -> None:
+        closes = [100.0 + index * 0.8 for index in range(40)]
+        highs = [value + 1.5 for value in closes]
+        lows = [value - 1.5 for value in closes]
+        history = pd.DataFrame(
+            {"Close": closes, "High": highs, "Low": lows},
+            index=pd.date_range("2026-01-01", periods=40, freq="D"),
+        )
+
+        summary = YFinanceHelperMixin._summarize_history(history)
+
+        technicals = summary["technicalIndicators"]
+        self.assertIn("rsi", technicals)
+        self.assertIn("macd", technicals)
+        self.assertIn("macdSignal", technicals)
+        self.assertIn("supportLevel", technicals)
+        self.assertIn("resistanceLevel", technicals)
+        self.assertGreaterEqual(
+            technicals["resistanceLevel"], technicals["supportLevel"]
+        )
+
 
 class FakeFinanceService:
     def screen_equities_by_market(self, *, region, exchange, sector=None, limit=25):

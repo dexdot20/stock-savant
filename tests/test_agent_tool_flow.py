@@ -577,6 +577,87 @@ class PreResearchAgentAdaptiveFetchTests(unittest.TestCase):
 
         self.assertEqual(agent._step_request_timeout, 37.0)
 
+    def test_step_timeout_uses_pre_research_overrides(self) -> None:
+        config = {
+            "network": {"request_timeout_seconds": 37},
+            "ai": {
+                "output_language": "English",
+                "agent_steps": {},
+                "agent_reflection": {},
+                "summarizer_settings": {},
+                "working_memory": {},
+                "rag": {"enabled": False},
+                "pre_research": {
+                    "request_timeout_seconds": 42,
+                    "discovery_request_timeout_seconds": 63,
+                },
+            },
+        }
+
+        with patch(
+            "services.ai.providers.pre_research_agent.get_config",
+            return_value=config,
+        ), patch(
+            "services.ai.providers.pre_research_agent.get_shared_memory_pool",
+            return_value=None,
+        ):
+            agent = PreResearchAgent(
+                logging.getLogger("pre-research-timeout-override-test"),
+                lambda key: "",
+                AsyncMock(),
+            )
+
+        self.assertEqual(agent._step_request_timeout, 42.0)
+        self.assertEqual(agent._discovery_request_timeout, 63.0)
+        self.assertEqual(agent._get_request_timeout_for_step(0), 63.0)
+        self.assertEqual(agent._get_request_timeout_for_step(3), 42.0)
+
+    def test_build_finish_blockers_requires_price_history_for_relative_low(self) -> None:
+        agent = PreResearchAgent.__new__(PreResearchAgent)
+        agent._finish_requirements = {
+            "min_steps": 2,
+            "min_non_memory_tools": 3,
+            "min_memory_updates": 2,
+            "min_distinct_tool_names": 2,
+            "min_price_history_calls_for_relative_low": 1,
+        }
+
+        blockers = agent._build_finish_blockers(
+            step=3,
+            total_non_memory_tools_executed=3,
+            total_memory_updates=2,
+            executed_tool_names={"search_memory", "yfinance_overview"},
+            price_history_calls=0,
+            criteria="Find BIST dip candidates at a relative low",
+        )
+
+        self.assertTrue(any("yfinance_price_history" in blocker for blocker in blockers))
+
+    def test_discovery_pivot_notice_triggers_after_repeated_weak_results(self) -> None:
+        agent = PreResearchAgent.__new__(PreResearchAgent)
+        agent._discovery_pivot_notified = False
+        agent._discovery_pivot_threshold = 2
+        agent._weak_discovery_family = None
+        agent._weak_discovery_streak = 0
+
+        first_notice = agent._update_discovery_pivot_state(
+            tool_name="search_web",
+            result_payload={
+                "success": True,
+                "data": {"web": {"results": []}},
+            },
+        )
+        second_notice = agent._update_discovery_pivot_state(
+            tool_name="search_web",
+            result_payload={
+                "success": True,
+                "data": {"web": {"results": []}},
+            },
+        )
+
+        self.assertIsNone(first_notice)
+        self.assertIn("Discovery drift detected", second_notice)
+
     def _build_agent(self) -> PreResearchAgent:
         agent = PreResearchAgent.__new__(PreResearchAgent)
         agent.logger = logging.getLogger("pre-research-adaptive-test")

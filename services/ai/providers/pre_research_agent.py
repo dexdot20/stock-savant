@@ -94,16 +94,67 @@ class PreResearchAgent(ResearchAgentSupportMixin):
         self._output_lang: str = config.get("ai", {}).get("output_language", "English")
         self._config = config
         self._screening_pivot_notified = False
+        self._discovery_pivot_notified = False
         summarizer_cfg = config.get("ai", {}).get("summarizer_settings", {})
+        pre_research_cfg = config.get("ai", {}).get("pre_research", {})
         self._summarizer_timeout = _safe_int(
             summarizer_cfg.get("summarizer_timeout_seconds", 60), 60
         )
         network_cfg = config.get("network", {})
         self._step_request_timeout = float(
-            network_cfg.get("request_timeout_seconds", 45) or 45
+            pre_research_cfg.get(
+                "request_timeout_seconds",
+                network_cfg.get("request_timeout_seconds", 45),
+            )
+            or 45
         )
         if self._step_request_timeout <= 0:
             self._step_request_timeout = 45.0
+        self._discovery_request_timeout = float(
+            pre_research_cfg.get(
+                "discovery_request_timeout_seconds",
+                self._step_request_timeout,
+            )
+            or self._step_request_timeout
+        )
+        if self._discovery_request_timeout < self._step_request_timeout:
+            self._discovery_request_timeout = self._step_request_timeout
+        finish_requirements_cfg = pre_research_cfg.get("finish_requirements", {})
+        self._finish_requirements = {
+            "min_steps": max(1, _safe_int(finish_requirements_cfg.get("min_steps", 2), 2)),
+            "min_non_memory_tools": max(
+                1,
+                _safe_int(finish_requirements_cfg.get("min_non_memory_tools", 3), 3),
+            ),
+            "min_memory_updates": max(
+                1,
+                _safe_int(finish_requirements_cfg.get("min_memory_updates", 2), 2),
+            ),
+            "min_distinct_tool_names": max(
+                1,
+                _safe_int(finish_requirements_cfg.get("min_distinct_tool_names", 2), 2),
+            ),
+            "min_price_history_calls_for_relative_low": max(
+                1,
+                _safe_int(
+                    finish_requirements_cfg.get(
+                        "min_price_history_calls_for_relative_low",
+                        1,
+                    ),
+                    1,
+                ),
+            ),
+        }
+        self._discovery_pivot_threshold = max(
+            2,
+            _safe_int(
+                pre_research_cfg.get("discovery_pivot_weak_result_streak", 2),
+                2,
+            ),
+        )
+        self._weak_discovery_family: Optional[str] = None
+        self._weak_discovery_streak = 0
+        self._relative_low_failures_notified: set[str] = set()
 
         working_memory_cfg = config.get("ai", {}).get("working_memory", {})
         shared_pool = (
@@ -164,9 +215,7 @@ class PreResearchAgent(ResearchAgentSupportMixin):
         self._current_exchange: str = ""
         self._history_archives: List[Dict[str, Any]] = []
         self._tool_journal: List[Dict[str, Any]] = []
-        adaptive_digest_cfg = config.get("ai", {}).get("pre_research", {}).get(
-            "adaptive_digest", {}
-        )
+        adaptive_digest_cfg = pre_research_cfg.get("adaptive_digest", {})
         self._adaptive_digest_enabled = bool(adaptive_digest_cfg.get("enabled", True))
         self._adaptive_simple_threshold_chars = _safe_int(
             adaptive_digest_cfg.get("simple_threshold_chars", 3000), 3000
@@ -229,6 +278,262 @@ class PreResearchAgent(ResearchAgentSupportMixin):
             return
         self._prune_recent_fetches()
         self._fetched_urls[normalized_url] = datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _coerce_float(value: Any) -> Optional[float]:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        if numeric != numeric or numeric in (float("inf"), float("-inf")):
+            return None
+        return numeric
+
+    @staticmethod
+    def _parse_tool_result_payload(result: Any) -> Dict[str, Any]:
+        if isinstance(result, dict):
+            return result
+        if not isinstance(result, str):
+            return {}
+        try:
+            parsed = json.loads(result)
+        except (TypeError, ValueError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    @staticmethod
+    def _unwrap_tool_data(result_payload: Dict[str, Any]) -> Dict[str, Any]:
+        data = result_payload.get("data")
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _tool_text_size(payload: Any) -> int:
+        if isinstance(payload, str):
+            return len(payload.strip())
+        if isinstance(payload, dict):
+            return sum(PreResearchAgent._tool_text_size(value) for value in payload.values())
+        if isinstance(payload, list):
+            return sum(PreResearchAgent._tool_text_size(value) for value in payload)
+        return len(str(payload or "").strip())
+
+    def _is_relative_low_screen(self, criteria: Any) -> bool:
+        normalized = str(criteria or "").strip().lower()
+        if not normalized:
+            return False
+        keywords = (
+            "relative low",
+            "dip",
+            "oversold",
+            "52-week low",
+            "52 week low",
+            "near low",
+            "entry point",
+        )
+        return any(keyword in normalized for keyword in keywords)
+
+    def _get_request_timeout_for_step(self, total_non_memory_tools_executed: int) -> float:
+        if total_non_memory_tools_executed < 2:
+            return max(self._discovery_request_timeout, self._step_request_timeout)
+        return self._step_request_timeout
+
+    def _restore_research_execution_state(
+        self,
+        history: List[Dict[str, Any]],
+    ) -> tuple[int, int, set[str], int]:
+        (
+            total_non_memory_tools_executed,
+            total_memory_updates,
+        ) = self._restore_execution_counters(history)
+        executed_tool_names: set[str] = set()
+        price_history_calls = 0
+
+        for index, message in enumerate(history):
+            if message.get("role") not in {"user", "tool"}:
+                continue
+            tool_name = self._extract_tool_name_from_history_message(history, index)
+            if not tool_name or tool_name in ("finish", "update_working_memory"):
+                continue
+            executed_tool_names.add(tool_name)
+            if tool_name == "yfinance_price_history":
+                price_history_calls += 1
+
+        return (
+            total_non_memory_tools_executed,
+            total_memory_updates,
+            executed_tool_names,
+            price_history_calls,
+        )
+
+    def _build_finish_blockers(
+        self,
+        *,
+        step: int,
+        total_non_memory_tools_executed: int,
+        total_memory_updates: int,
+        executed_tool_names: set[str],
+        price_history_calls: int,
+        criteria: Any,
+    ) -> List[str]:
+        blockers: List[str] = []
+        requirements = self._finish_requirements
+
+        if step < int(requirements["min_steps"]):
+            blockers.append(
+                f"at least {requirements['min_steps']} steps required (current: {step})"
+            )
+        if total_non_memory_tools_executed < int(requirements["min_non_memory_tools"]):
+            blockers.append(
+                "not enough research tools executed "
+                f"(required: {requirements['min_non_memory_tools']}, current: {total_non_memory_tools_executed})"
+            )
+        if len(executed_tool_names) < int(requirements["min_distinct_tool_names"]):
+            blockers.append(
+                "not enough distinct research tools used "
+                f"(required: {requirements['min_distinct_tool_names']}, current: {len(executed_tool_names)})"
+            )
+        if total_memory_updates < int(requirements["min_memory_updates"]):
+            blockers.append(
+                "working memory not updated enough "
+                f"(required: {requirements['min_memory_updates']}, current: {total_memory_updates})"
+            )
+        if (
+            self._is_relative_low_screen(criteria)
+            and price_history_calls
+            < int(requirements["min_price_history_calls_for_relative_low"])
+        ):
+            blockers.append(
+                "relative-low screening requires yfinance_price_history evidence "
+                f"(required: {requirements['min_price_history_calls_for_relative_low']}, current: {price_history_calls})"
+            )
+        return blockers
+
+    def _record_relative_low_observation(
+        self,
+        *,
+        tool_name: str,
+        args: Dict[str, Any],
+        result_payload: Dict[str, Any],
+        criteria: Any,
+    ) -> Optional[str]:
+        if tool_name != "yfinance_price_history" or not self._is_relative_low_screen(criteria):
+            return None
+
+        data = self._unwrap_tool_data(result_payload)
+        candles = data.get("candles") if isinstance(data.get("candles"), dict) else {}
+        range_position = self._coerce_float(candles.get("rangePositionPct"))
+        if range_position is None:
+            return None
+
+        is_near_period_low = candles.get("isNearPeriodLow")
+        is_relative_low = (
+            bool(is_near_period_low)
+            if isinstance(is_near_period_low, bool)
+            else range_position <= 25.0
+        )
+        if is_relative_low:
+            return None
+
+        ticker = str(
+            args.get("ticker")
+            or args.get("symbol")
+            or data.get("ticker")
+            or data.get("symbol")
+            or "candidate"
+        ).strip().upper()
+        if not ticker or ticker in self._relative_low_failures_notified:
+            return None
+
+        self._relative_low_failures_notified.add(ticker)
+        self.memory.update_from_args(
+            {
+                "rejected_hypotheses": [
+                    f"{ticker} is not at a relative low; recent range position is {range_position:.1f}%"
+                ],
+                "research_milestones": [
+                    (
+                        f"Relative-low validation rejected {ticker}. Do not describe it as a dip "
+                        f"or strong entry point unless new price-history evidence changes the setup."
+                    )
+                ],
+            }
+        )
+        return (
+            f"⚠️ Relative-low validation: {ticker} failed the price-history check "
+            f"({range_position:.1f}% of recent range). Do not present it as a dip candidate."
+        )
+
+    def _is_weak_discovery_result(
+        self,
+        tool_name: str,
+        result_payload: Dict[str, Any],
+    ) -> bool:
+        if not result_payload or result_payload.get("error") or result_payload.get("success") is False:
+            return True
+
+        data = self._unwrap_tool_data(result_payload)
+        if tool_name == "search_web":
+            results = ((data.get("web") or {}) if isinstance(data, dict) else {}).get("results") or []
+            return len(results) == 0
+        if tool_name in ("search_news", "search_google_news"):
+            container = data.get("news") if isinstance(data.get("news"), dict) else data
+            results = container.get("results") if isinstance(container, dict) else []
+            return not results
+        if tool_name in ("fetch_url_content", "summarize_url_content"):
+            text_size = self._tool_text_size(data)
+            if text_size < 200:
+                return True
+            lowered = json.dumps(data, ensure_ascii=False, default=str).lower()
+            boilerplate_markers = (
+                "enable javascript",
+                "sign in",
+                "cookie",
+                "subscribe",
+                "accept all",
+                "navigation",
+            )
+            return any(marker in lowered for marker in boilerplate_markers) and text_size < 1200
+        return False
+
+    def _update_discovery_pivot_state(
+        self,
+        *,
+        tool_name: str,
+        result_payload: Dict[str, Any],
+    ) -> Optional[str]:
+        discovery_family = None
+        if tool_name in ("search_web", "search_news", "search_google_news"):
+            discovery_family = "search"
+        elif tool_name in ("fetch_url_content", "summarize_url_content"):
+            discovery_family = "url"
+
+        if not discovery_family:
+            return None
+        if not self._is_weak_discovery_result(tool_name, result_payload):
+            if self._weak_discovery_family == discovery_family:
+                self._weak_discovery_streak = 0
+            return None
+
+        if self._weak_discovery_family == discovery_family:
+            self._weak_discovery_streak += 1
+        else:
+            self._weak_discovery_family = discovery_family
+            self._weak_discovery_streak = 1
+
+        if self._discovery_pivot_notified or self._weak_discovery_streak < self._discovery_pivot_threshold:
+            return None
+
+        self._discovery_pivot_notified = True
+        if discovery_family == "search":
+            return (
+                "⚠️ Discovery drift detected: repeated low-signal web search results. "
+                "Stop repeating search_web-style discovery and pivot to another family such as "
+                "KAP, yfinance_overview, yfinance_sector_analysis, or a direct ticker validation path."
+            )
+        return (
+            "⚠️ Discovery drift detected: repeated low-signal URL fetch/summarize results. "
+            "Stop recycling summarize_url_content/fetch_url_content on similar pages and pivot to another "
+            "tool family with verifiable market or filing data."
+        )
 
     def _build_fetch_focus_query(self, explicit_focus_query: Optional[str]) -> str:
         explicit = str(explicit_focus_query or "").strip()
@@ -977,7 +1282,7 @@ class PreResearchAgent(ResearchAgentSupportMixin):
 
         if console:
             console.print(
-                f"[dim]🧠 Pre-research planning is running with a {self._step_request_timeout:.0f}s AI timeout.[/dim]"
+                f"[dim]🧠 Pre-research planning is running with a {self._get_request_timeout_for_step(0):.0f}s AI timeout.[/dim]"
             )
 
         today = datetime.now().strftime("%d %B %Y")
@@ -1036,11 +1341,15 @@ class PreResearchAgent(ResearchAgentSupportMixin):
 
         total_non_memory_tools_executed = 0
         total_memory_updates = 0
+        executed_tool_names: set[str] = set()
+        total_price_history_calls = 0
         if loaded_state:
             (
                 total_non_memory_tools_executed,
                 total_memory_updates,
-            ) = self._restore_execution_counters(history)
+                executed_tool_names,
+                total_price_history_calls,
+            ) = self._restore_research_execution_state(history)
         consecutive_no_tool_calls = 0
         # Track (tool_name, args_hash) to detect and skip identical duplicate calls.
         _NON_DEDUP_TOOLS = {"update_working_memory", "finish", "search_memory"}
@@ -1074,10 +1383,13 @@ class PreResearchAgent(ResearchAgentSupportMixin):
                 )
 
             try:
+                current_request_timeout = self._get_request_timeout_for_step(
+                    total_non_memory_tools_executed
+                )
                 response = await self._request_executor.send_async(
                     history,
                     request_type="pre_research",
-                    timeout_override=self._step_request_timeout,
+                    timeout_override=current_request_timeout,
                     console=console,
                     **tool_request_kwargs,
                 )
@@ -1390,31 +1702,15 @@ class PreResearchAgent(ResearchAgentSupportMixin):
                     )
                     continue
 
-                # Hard guard against premature finish.
-                min_steps_required = 2
-                min_tools_required = 2
-                min_memory_updates_required = 1
-                if (
-                    step < min_steps_required
-                    or total_non_memory_tools_executed < min_tools_required
-                    or total_memory_updates < min_memory_updates_required
-                ):
-                    blockers: List[str] = []
-                    if step < min_steps_required:
-                        blockers.append(
-                            f"at least {min_steps_required} steps required (current: {step})"
-                        )
-                    if total_non_memory_tools_executed < min_tools_required:
-                        blockers.append(
-                            "not enough research tools executed "
-                            f"(required: {min_tools_required}, current: {total_non_memory_tools_executed})"
-                        )
-                    if total_memory_updates < min_memory_updates_required:
-                        blockers.append(
-                            "working memory not updated enough "
-                            f"(required: {min_memory_updates_required}, current: {total_memory_updates})"
-                        )
-
+                blockers = self._build_finish_blockers(
+                    step=step,
+                    total_non_memory_tools_executed=total_non_memory_tools_executed,
+                    total_memory_updates=total_memory_updates,
+                    executed_tool_names=executed_tool_names,
+                    price_history_calls=total_price_history_calls,
+                    criteria=criteria,
+                )
+                if blockers:
                     reason = "; ".join(blockers)
                     self.logger.warning(
                         "Premature finish blocked in pre_research: %s", reason
@@ -1621,11 +1917,32 @@ class PreResearchAgent(ResearchAgentSupportMixin):
                             )
                         )
 
+            runtime_notices: List[str] = []
             for i, result in enumerate(results):
                 tool_name = param_map[i]["name"]
                 tool_call = param_map[i]["tool_call"]
                 if tool_name not in ("finish", "update_working_memory"):
                     total_non_memory_tools_executed += 1
+                    executed_tool_names.add(tool_name)
+                    if tool_name == "yfinance_price_history":
+                        total_price_history_calls += 1
+
+                parsed_result_payload = self._parse_tool_result_payload(result)
+                relative_low_notice = self._record_relative_low_observation(
+                    tool_name=tool_name,
+                    args=tool_call.get("args", {}) if isinstance(tool_call, dict) else {},
+                    result_payload=parsed_result_payload,
+                    criteria=criteria,
+                )
+                if relative_low_notice:
+                    runtime_notices.append(relative_low_notice)
+
+                discovery_notice = self._update_discovery_pivot_state(
+                    tool_name=tool_name,
+                    result_payload=parsed_result_payload,
+                )
+                if discovery_notice:
+                    runtime_notices.append(discovery_notice)
 
                 history.append(
                     build_tool_result_history_message(
@@ -1661,6 +1978,10 @@ class PreResearchAgent(ResearchAgentSupportMixin):
                         ),
                     }
                 )
+
+            for notice in dict.fromkeys(runtime_notices):
+                history.append({"role": "user", "content": notice})
+                journal_notes.append(notice)
 
             self._record_tool_journal_step(
                 step,
