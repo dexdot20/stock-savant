@@ -188,7 +188,7 @@ class PortfolioRiskService:
                         "severity": "high",
                         "symbol": item.get("symbol"),
                         "message": (
-                            f"{item.get('symbol')} ağırlığı %{float(item.get('weight_pct', 0.0)):.2f}; "
+                            f"{item.get('symbol')} weight %{float(item.get('weight_pct', 0.0)):.2f}; "
                             f"limit %{max_single_pct:.2f}."
                         ),
                     }
@@ -201,7 +201,7 @@ class PortfolioRiskService:
                         "symbol": item.get("symbol"),
                         "message": (
                             f"{item.get('symbol')} confidence %{float(item.get('confidence_pct', 0.0)):.2f}; "
-                            f"eşik %{low_confidence_threshold:.2f}."
+                            f"threshold %{low_confidence_threshold:.2f}."
                         ),
                     }
                 )
@@ -214,8 +214,8 @@ class PortfolioRiskService:
                         "severity": "medium",
                         "sector": sector.get("sector"),
                         "message": (
-                            f"{sector.get('sector')} sektör ağırlığı %{float(sector.get('weight_pct', 0.0)):.2f}; "
-                            f"sektör limiti %{sector_limit_pct:.2f}."
+                            f"{sector.get('sector')} sector weight %{float(sector.get('weight_pct', 0.0)):.2f}; "
+                            f"sector limit %{sector_limit_pct:.2f}."
                         ),
                     }
                 )

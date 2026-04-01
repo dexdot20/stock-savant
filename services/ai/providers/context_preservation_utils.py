@@ -216,6 +216,6 @@ def build_ephemeral_fallback_fact(
         return None
 
     return (
-        f"[Fallback:{tool_name}] Ephemeral çıktı stub öncesi otomatik yedeklendi: "
+        f"[Fallback:{tool_name}] Ephemeral output automatically backed up before stub: "
         f"{preview}"
     )

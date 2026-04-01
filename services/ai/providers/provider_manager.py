@@ -104,7 +104,7 @@ class ProviderManager:
             handler = self._get_handler(provider_name)
             if handler is None:
                 handler_issue = (
-                    f"{self._get_provider_display_name(provider_name)}: istek işleyicisi bulunamadı."
+                    f"{self._get_provider_display_name(provider_name)}: request handler not found."
                 )
                 errors.append(handler_issue)
                 self.logger.warning("Handler not found: %s", provider_name)
@@ -312,7 +312,7 @@ class ProviderManager:
             handler = self._get_async_handler(provider_name)
             if handler is None:
                 handler_issue = (
-                    f"{self._get_provider_display_name(provider_name)}: async istek işleyicisi bulunamadı."
+                    f"{self._get_provider_display_name(provider_name)}: async request handler not found."
                 )
                 errors.append(handler_issue)
                 self.logger.warning("Async handler not found: %s", provider_name)
@@ -492,7 +492,7 @@ class ProviderManager:
     def _is_provider_enabled(self, provider_name: str) -> bool:
         provider_cfg = self.providers_cfg.get(provider_name, {})
         if not provider_cfg:
-            self.logger.debug(f"Provider {provider_name}: config bulunamadı")
+            self.logger.debug(f"Provider {provider_name}: config not found")
             return False
 
         enabled = provider_cfg.get("enabled")
@@ -516,7 +516,7 @@ class ProviderManager:
             return True
 
         self.logger.debug(
-            f"Provider {provider_name}: devre dışı (API anahtarı geçersiz veya eksik)"
+            f"Provider {provider_name}: disabled (API key missing or invalid)"
         )
         return False
 
@@ -524,22 +524,22 @@ class ProviderManager:
         display = self._get_provider_display_name(provider_name)
         provider_cfg = self.providers_cfg.get(provider_name, {})
         if not provider_cfg:
-            return f"{display}: sağlayıcı yapılandırması bulunamadı."
+            return f"{display}: provider configuration not found."
 
         enabled = provider_cfg.get("enabled")
         if enabled is False:
-            return f"{display}: yapılandırmada devre dışı bırakılmış."
+            return f"{display}: disabled in configuration."
 
         key_field = self._API_KEY_FIELDS.get(provider_name)
         if key_field:
             api_key = provider_cfg.get(key_field)
             if not is_configured_secret(api_key):
                 return (
-                    f"{display}: API anahtarı eksik veya geçersiz. "
-                    f"config/settings.py içindeki ai.providers.{provider_name}.{key_field} alanını kontrol edin."
+                    f"{display}: API key missing or invalid. "
+                    f"Check ai.providers.{provider_name}.{key_field} in config/settings.py."
                 )
 
-        return f"{display}: şu anda kullanılamıyor."
+        return f"{display}: currently unavailable."
 
     def _get_handler(self, provider_name: str) -> Optional[ProviderCallable]:
         provider = self._provider_clients.get(provider_name)

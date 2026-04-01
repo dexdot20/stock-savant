@@ -30,7 +30,7 @@ class YFinanceEarningsMixin:
                     lambda: ticker.earnings_history, name="ticker.earnings_history"
                 )
         except Exception as exc:
-            self.logger.debug("Earnings geçmişi alınamadı: %s", exc)
+            self.logger.debug("Earnings history could not be retrieved: %s", exc)
             raw_history = None
 
         if raw_history is None:
@@ -84,7 +84,7 @@ class YFinanceEarningsMixin:
                         ),
                     }
             except Exception as exc:
-                self.logger.debug("Earnings history frame işlenemedi: %s", exc)
+                self.logger.debug("Earnings history frame could not be processed: %s", exc)
 
         if not lookup and isinstance(raw_history, list):
             for item in raw_history:
@@ -129,7 +129,7 @@ class YFinanceEarningsMixin:
 
             return self._dataframe_to_records(dates_df)
         except Exception as exc:
-            self.logger.debug("Gelecek bilanço tarihleri alınamadı: %s", exc)
+            self.logger.debug("Future earnings dates could not be retrieved: %s", exc)
             return {}
 
     def _build_earnings_trend(self, ticker: yf.Ticker) -> List[Dict[str, Any]]:
@@ -205,7 +205,7 @@ class YFinanceEarningsMixin:
                             )
                             return trend
                 except Exception as exc:
-                    self.logger.debug("quarterly_income_stmt işlenemedi: %s", exc)
+                    self.logger.debug("quarterly_income_stmt could not be processed: %s", exc)
 
             # Fallback to quarterly_earnings
             try:
@@ -237,7 +237,7 @@ class YFinanceEarningsMixin:
                             )
                             return trend
             except Exception as exc:
-                self.logger.debug("quarterly_earnings işlenemedi: %s", exc)
+                self.logger.debug("quarterly_earnings could not be processed: %s", exc)
 
         return []
 
@@ -255,7 +255,7 @@ class YFinanceEarningsMixin:
                     lambda: ticker.eps_revisions, name="ticker.eps_revisions"
                 )
         except Exception as exc:
-            self.logger.debug("EPS revizyonları alınamadı: %s", exc)
+            self.logger.debug("EPS revisions could not be retrieved: %s", exc)
             df = None
 
         frame = self._ensure_dataframe(df)
@@ -277,7 +277,7 @@ class YFinanceEarningsMixin:
                 }
             return result
         except Exception as exc:
-            self.logger.debug("EPS revizyonları işlenemedi: %s", exc)
+            self.logger.debug("EPS revisions could not be processed: %s", exc)
             return {}
 
     def _build_eps_trend_snapshot(self, ticker: yf.Ticker) -> Dict[str, Any]:
@@ -294,7 +294,7 @@ class YFinanceEarningsMixin:
                     lambda: ticker.eps_trend, name="ticker.eps_trend"
                 )
         except Exception as exc:
-            self.logger.debug("EPS trend alınamadı: %s", exc)
+            self.logger.debug("EPS trend could not be retrieved: %s", exc)
             df = None
 
         frame = self._ensure_dataframe(df)
@@ -315,7 +315,7 @@ class YFinanceEarningsMixin:
                 }
             return result
         except Exception as exc:
-            self.logger.debug("EPS trend işlenemedi: %s", exc)
+            self.logger.debug("EPS trend could not be processed: %s", exc)
             return {}
 
     def _build_events_snapshot(self, ticker: yf.Ticker) -> Dict[str, Any]:
@@ -335,7 +335,7 @@ class YFinanceEarningsMixin:
                 earnings_raw = ticker.earnings_dates
         except Exception as exc:
             self.logger.debug(
-                "Earnings tarihleri alınamadı (retry yok): %s", str(exc)[:100]
+                "Earnings dates could not be retrieved (no retry): %s", str(exc)[:100]
             )
             earnings_raw = None
 
@@ -404,7 +404,7 @@ class YFinanceEarningsMixin:
                 if earnings_list:
                     snapshot["earningsDates"] = earnings_list
             except Exception as exc:
-                self.logger.debug("Earnings tarihleri işlenemedi: %s", exc)
+                self.logger.debug("Earnings dates could not be processed: %s", exc)
 
         calendar_df = self._ensure_dataframe(getattr(ticker, "calendar", None))
         if calendar_df is not None and not calendar_df.empty:
@@ -413,12 +413,12 @@ class YFinanceEarningsMixin:
                 if not calendar_df.empty:
                     row = calendar_df.iloc[0]
                     translation_map = {
-                        "Earnings Date": "Kazanç Açıklama Tarihi",
-                        "Earnings Call": "Kazanç Konferans Çağrısı",
-                        "Ex-Dividend Date": "Temettü Kesim Tarihi",
-                        "Dividend Date": "Temettü Ödeme Tarihi",
-                        "Conference Call": "Konferans Çağrısı",
-                        "Annual Shareholders Meeting Date": "Genel Kurul Tarihi",
+                        "Earnings Date": "Earnings Date",
+                        "Earnings Call": "Earnings Call",
+                        "Ex-Dividend Date": "Ex-Dividend Date",
+                        "Dividend Date": "Dividend Date",
+                        "Conference Call": "Conference Call",
+                        "Annual Shareholders Meeting Date": "Annual Shareholders Meeting Date",
                     }
 
                     filtered_events: Dict[str, Any] = {}
@@ -453,7 +453,7 @@ class YFinanceEarningsMixin:
                             "localized": filtered_localized,
                         }
             except Exception as exc:
-                self.logger.debug("Takvim verisi işlenemedi: %s", exc)
+                self.logger.debug("Calendar data could not be processed: %s", exc)
 
         return snapshot
 

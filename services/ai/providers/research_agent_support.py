@@ -522,7 +522,7 @@ class ResearchAgentSupportMixin:
             return
 
         fallback_fact = (
-            f"[Fallback:{tool_name}] Ephemeral çıktı stub öncesi otomatik yedeklendi: "
+            f"[Fallback:{tool_name}] Ephemeral output automatically backed up before stub: "
             f"{fallback_preview}"
         )
         self.memory.update(
@@ -530,7 +530,7 @@ class ResearchAgentSupportMixin:
             fact_importance=6,
             fact_tags=["fallback", "ephemeral"],
             research_milestones=[
-                "Ephemeral araç çıktısı stub öncesi otomatik yedeklendi"
+                "Ephemeral tool output automatically backed up before stub"
             ],
             source_summary="fallback:auto_backup",
         )

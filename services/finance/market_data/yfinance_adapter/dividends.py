@@ -34,7 +34,7 @@ class YFinanceDividendMixin:
                     lambda: ticker.dividends, name="ticker.dividends"
                 )
         except Exception as exc:
-            self.logger.debug("Temettü verisi alınamadı: %s", exc)
+            self.logger.debug("Dividend data could not be retrieved: %s", exc)
             dividends_raw = None
 
         series = self._ensure_series(dividends_raw)
@@ -88,7 +88,7 @@ class YFinanceDividendMixin:
                     if 0 <= yield_value <= 20:
                         snapshot["dividendYield"] = round(yield_value, 4)
         except Exception as exc:
-            self.logger.debug("Temettü verisi işlenemedi: %s", exc)
+            self.logger.debug("Dividend data could not be processed: %s", exc)
 
         snapshot.setdefault(
             "dividendYield", self._convert_dividend_yield(info.get("dividendYield"))
@@ -118,7 +118,7 @@ class YFinanceDividendMixin:
                     lambda: ticker.splits, name="ticker.splits"
                 )
         except Exception as exc:
-            self.logger.debug("Splits verisi alınamadı: %s", exc)
+            self.logger.debug("Splits data could not be retrieved: %s", exc)
             return []
 
         series = self._ensure_series(splits_raw)
@@ -148,7 +148,7 @@ class YFinanceDividendMixin:
 
             return splits_list
         except Exception as exc:
-            self.logger.debug("Splits verisi işlenemedi: %s", exc)
+            self.logger.debug("Splits data could not be processed: %s", exc)
             return []
 
     def _build_actions_snapshot(self, ticker: yf.Ticker) -> List[Dict[str, Any]]:
@@ -167,7 +167,7 @@ class YFinanceDividendMixin:
                     lambda: ticker.actions, name="ticker.actions"
                 )
         except Exception as exc:
-            self.logger.debug("Actions verisi alınamadı: %s", exc)
+            self.logger.debug("Actions data could not be retrieved: %s", exc)
             return []
 
         df = self._ensure_dataframe(actions_raw)
@@ -206,7 +206,7 @@ class YFinanceDividendMixin:
 
             return actions_list
         except Exception as exc:
-            self.logger.debug("Actions verisi işlenemedi: %s", exc)
+            self.logger.debug("Actions data could not be processed: %s", exc)
             return []
 
     def _build_capital_gains_snapshot(self, ticker: yf.Ticker) -> List[Dict[str, Any]]:
@@ -225,7 +225,7 @@ class YFinanceDividendMixin:
                     lambda: ticker.capital_gains, name="ticker.capital_gains"
                 )
         except Exception as exc:
-            self.logger.debug("Capital gains verisi alınamadı: %s", exc)
+            self.logger.debug("Capital gains data could not be retrieved: %s", exc)
             return []
 
         series = self._ensure_series(capital_gains_raw)
@@ -255,7 +255,7 @@ class YFinanceDividendMixin:
 
             return gains_list
         except Exception as exc:
-            self.logger.debug("Capital gains verisi işlenemedi: %s", exc)
+            self.logger.debug("Capital gains data could not be processed: %s", exc)
             return []
 
     def _extract_next_dividend_date(

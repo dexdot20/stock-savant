@@ -145,14 +145,14 @@ class DataValidationService:
                 numeric_value = float(value)
             except (TypeError, ValueError):
                 self.logger.debug(
-                    "%s sayısal olarak parse edilemedi, N/A atandı", field
+                    "%s could not be parsed as numeric, set to N/A", field
                 )
                 data[field] = NA_VALUE
                 continue
 
             if min_val is not None and numeric_value < min_val:
                 self.logger.debug(
-                    "%s değeri alt sınırın altında (%s), N/A yapıldı",
+                    "%s value below minimum (%s), set to N/A",
                     field,
                     numeric_value,
                 )
@@ -161,7 +161,7 @@ class DataValidationService:
 
             if max_val is not None and numeric_value > max_val:
                 self.logger.debug(
-                    "%s değeri üst sınırın üzerinde (%s), N/A yapıldı",
+                    "%s value above maximum (%s), set to N/A",
                     field,
                     numeric_value,
                 )
@@ -179,17 +179,17 @@ class DataValidationService:
             parsed = self._parse_date(raw_value)
             if parsed is None:
                 self.logger.debug(
-                    "%s tarihi parse edilemedi (%s), N/A yapıldı", field, raw_value
+                    "%s date could not be parsed (%s), set to N/A", field, raw_value
                 )
                 data[field] = NA_VALUE
                 continue
 
             if expectation == "future" and parsed <= today:
-                self.logger.debug("%s tarihi geçmişte (%s), N/A yapıldı", field, parsed)
+                self.logger.debug("Date %s is in the past (%s), set to N/A", field, parsed)
                 data[field] = NA_VALUE
             elif expectation == "past_or_today" and parsed > today:
                 self.logger.debug(
-                    "%s tarihi gelecekte (%s), N/A yapıldı", field, parsed
+                    "Date %s is in the future (%s), set to N/A", field, parsed
                 )
                 data[field] = NA_VALUE
 
@@ -241,7 +241,7 @@ class DataValidationService:
         for field in self._positive_fields:
             value = safe_float(data.get(field))
             if value is not None and value <= 0:
-                inconsistencies[field] = f"Değer pozitif olmalı, mevcut: {value}"
+                inconsistencies[field] = f"Value must be positive, current: {value}"
 
         # Sınır kontrollerini tek merkezden yap
         for field, (min_val, max_val) in self._numeric_bounds.items():
@@ -251,11 +251,11 @@ class DataValidationService:
 
             if min_val is not None and value < min_val:
                 inconsistencies[field] = (
-                    f"{field} alt sınırın altında ({value}), beklenen >= {min_val}"
+                    f"{field} below lower bound ({value}), expected >= {min_val}"
                 )
             elif max_val is not None and value > max_val:
                 inconsistencies[field] = (
-                    f"{field} üst sınırın üzerinde ({value}), beklenen <= {max_val}"
+                    f"{field} above upper bound ({value}), expected <= {max_val}"
                 )
 
         return inconsistencies
@@ -279,10 +279,10 @@ class DataValidationService:
 
             if market_cap and price:
                 # Çok küçük şirketler için uyarı
-                if market_cap < 1000000:  # 1M USD altı
+                if market_cap < 1000000:  # 1M USD threshold
                     curr_sym = get_currency_symbol(data.get("currency"))
                     relationship_issues["marketCap"] = (
-                        f"Piyasa değeri çok düşük: {curr_sym}{market_cap:,.0f}"
+                        f"Market capitalization is very low: {curr_sym}{market_cap:,.0f}"
                     )
 
             # ROE ve ROA ilişkisi
@@ -293,7 +293,7 @@ class DataValidationService:
                 # ROE genellikle ROA'dan yüksek olmalı (kaldıraç etkisi)
                 if abs(roe) > 0.01 and abs(roa) > 0.01 and roe < roa:
                     relationship_issues["returnOnEquity"] = (
-                        f"ROE ({roe:.2%}) genellikle ROA ({roa:.2%})'dan yüksek olmalı"
+                        f"ROE ({roe:.2%}) is typically higher than ROA ({roa:.2%})"
                     )
 
             # Current Ratio ve Quick Ratio ilişkisi
@@ -303,7 +303,7 @@ class DataValidationService:
             if current_ratio and quick_ratio:
                 if quick_ratio > current_ratio:
                     relationship_issues["quickRatio"] = (
-                        f"Asit test oranı ({quick_ratio:.2f}) cari orandan ({current_ratio:.2f}) yüksek olamaz"
+                        f"Quick ratio ({quick_ratio:.2f}) cannot be higher than current ratio ({current_ratio:.2f})"
                     )
 
             # Revenue ve Net Income tutarlılığı
@@ -313,7 +313,7 @@ class DataValidationService:
             if revenue and net_income:
                 if abs(net_income) > abs(revenue):
                     relationship_issues["netIncome"] = (
-                        f"Net gelir ({net_income:,.0f}) hasılatı ({revenue:,.0f}) geçiyor"
+                        f"Net income ({net_income:,.0f}) exceeds revenue ({revenue:,.0f})"
                     )
 
             # 52-week range kontrolü
@@ -324,15 +324,15 @@ class DataValidationService:
             if high_52w and low_52w and current_price:
                 if low_52w > high_52w:
                     relationship_issues["fiftyTwoWeekLow"] = (
-                        f"52-hafta düşük ({low_52w}) yüksekten ({high_52w}) büyük olamaz"
+                        f"52-week low ({low_52w}) cannot be greater than high ({high_52w})"
                     )
                 elif current_price < low_52w or current_price > high_52w:
                     relationship_issues["regularMarketPrice"] = (
-                        f"Güncel fiyat ({current_price}) 52-hafta aralığı dışında"
+                        f"Current price ({current_price}) outside 52-week range"
                     )
 
         except Exception as e:
-            self.logger.debug("İlişkisel kontrol hatası: %s", e)
+            self.logger.debug("Relational validation error: %s", e)
 
         return relationship_issues
 
@@ -395,7 +395,7 @@ class DataValidationService:
             ]
             if missing_index_fields:
                 self.logger.debug(
-                    "Endeks için eksik temel alanlar: %s", missing_index_fields
+                    "Missing required index fields: %s", missing_index_fields
                 )
                 return False
 
@@ -409,7 +409,7 @@ class DataValidationService:
                 )
             )
             if not has_price_like:
-                self.logger.debug("Endeks için fiyat benzeri alan bulunamadı")
+                self.logger.debug("No price-like fields found for index")
                 return False
             return True
 
@@ -424,7 +424,7 @@ class DataValidationService:
         if not self._is_valid_numeric(
             data.get("regularMarketPrice"), allow_negative=False
         ):
-            self.logger.debug("Güncel fiyat eksik veya geçersiz (devam ediliyor)")
+            self.logger.debug("Current price missing or invalid (continuing)")
 
         # En az bir finansal metrik olmalı
         financial_metrics_present = 0

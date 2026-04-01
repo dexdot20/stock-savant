@@ -311,7 +311,7 @@ class AutonomousNewsAgent:
             if str(question).strip()
         ]
         if questions:
-            partial_report += "## ❓ Yanıtlanmamış Sorular\n"
+            partial_report += "## ❓ Unanswered Questions\n"
             partial_report += "\n".join(f"- {question}" for question in questions)
 
         return partial_report
@@ -490,12 +490,12 @@ class AutonomousNewsAgent:
             return [str(item).strip() for item in consolidated if str(item).strip()]
         except (json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
             self.logger.warning(
-                "Callback bellek konsolidasyonu başarısız (JSON/Tip hatası): %s", exc
+                "Callback memory consolidation failed (JSON/Type error): %s", exc
             )
             return []
         except Exception as exc:
             self.logger.warning(
-                "Callback bellek konsolidasyonu başarısız (beklenmeyen hata): %s", exc
+                "Callback memory consolidation failed (unexpected error): %s", exc
             )
             return []
 
@@ -946,7 +946,7 @@ class AutonomousNewsAgent:
         if not preview:
             return None
 
-        return f"[Fallback:{tool_name}] Ephemeral çıktı stub öncesi otomatik yedeklendi: {preview}"
+        return f"[Fallback:{tool_name}] Ephemeral output automatically backed up before stub: {preview}"
 
     def _capture_ephemeral_result_before_stub(
         self,
@@ -972,7 +972,7 @@ class AutonomousNewsAgent:
                 fact_importance=6,
                 fact_tags=["fallback", "ephemeral"],
                 research_milestones=[
-                    "Ephemeral araç çıktısı stub öncesi otomatik yedeklendi"
+                    "Ephemeral tool output automatically backed up before stub"
                 ],
                 source_summary="fallback:auto_backup",
             )
@@ -1013,15 +1013,15 @@ class AutonomousNewsAgent:
 
         chunks = []
         if facts_text:
-            chunks.append("Son bulgular: " + " | ".join(facts_text))
+            chunks.append("Recent findings: " + " | ".join(facts_text))
         if open_questions:
-            chunks.append("Açık sorular: " + " | ".join(open_questions))
+            chunks.append("Open questions: " + " | ".join(open_questions))
         if contradictions:
-            chunks.append("Çelişkiler: " + " | ".join(contradictions))
+            chunks.append("Contradictions: " + " | ".join(contradictions))
         if rejected:
-            chunks.append("Reddedilen hipotez: " + " | ".join(rejected))
+            chunks.append("Rejected hypothesis: " + " | ".join(rejected))
         if milestones:
-            chunks.append("Son kilometre taşı: " + " | ".join(milestones))
+            chunks.append("Latest milestone: " + " | ".join(milestones))
 
         return " ; ".join(chunks)
 
@@ -1840,7 +1840,7 @@ class AutonomousNewsAgent:
             try:
                 if console:
                     console.print(
-                        f"\n[yellow]⚠️  Maksimum işlem sınırına ulaşıldı ({max_steps} adım).[/yellow]"
+                        f"\n[yellow]⚠️  Maximum operation limit reached ({max_steps} steps).[/yellow]"
                     )
 
                 should_continue = on_max_steps_callback(current_state)
@@ -1871,7 +1871,7 @@ class AutonomousNewsAgent:
                         "resumed_from_snapshot": resumed_from_snapshot,
                     }
             except Exception as e:
-                self.logger.error("Devam callback'i başarısız oldu: %s", e)
+                self.logger.error("Continue callback failed: %s", e)
 
         # No continuation - build partial report from collected data
         partial_report = self._build_partial_report()
@@ -2043,17 +2043,17 @@ class AutonomousNewsAgent:
             if not digest_text:
                 return fallback_result_str
             self.logger.info(
-                "fetch_url_content digest: %d \u2192 %d karakter",
+                "fetch_url_content digest: %d \u2192 %d characters",
                 len(prepared_payload),
                 len(digest_text),
             )
             if console:
                 console.print(
-                    f"[dim]\U0001f52c URL özeti: {len(prepared_payload):,} \u2192 {len(digest_text):,} karakter[/dim]"
+                    f"[dim]\U0001f52c URL summary: {len(prepared_payload):,} \u2192 {len(digest_text):,} characters[/dim]"
                 )
             return json.dumps({"url": url, "digest": digest_text}, ensure_ascii=False)
         except Exception as exc:
             self.logger.warning(
-                "fetch_url_content digest başarısız, ham içerik kullanılıyor: %s", exc
+                "fetch_url_content digest failed, using raw content: %s", exc
             )
             return fallback_result_str

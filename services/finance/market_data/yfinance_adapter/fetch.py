@@ -285,7 +285,7 @@ class YFinanceFetchMixin:
                     self._set_yfinance_proxy(proxy)
 
         except Exception as exc:
-            self.logger.debug("Fiyat geçmişi alınamadı (%s): %s", ticker, exc)
+            self.logger.debug("Price history could not be retrieved (%s): %s", ticker, exc)
             return None
 
         if price_history is None or price_history.empty:
@@ -338,7 +338,7 @@ class YFinanceFetchMixin:
                         result["rsi"] = rsi_val
                 except Exception as rsi_exc:
                     self.logger.debug(
-                        "RSI hesaplama başarısız (%s): %s", ticker, rsi_exc
+                        "RSI calculation failed (%s): %s", ticker, rsi_exc
                     )
 
         return result
@@ -354,7 +354,7 @@ class YFinanceFetchMixin:
 
         if not info and not fast_info and proxy:
             self.logger.warning(
-                "⚠️ [INDEX] Proxy ile veri yok, proxiesiz deneniyor: %s", ticker
+                "⚠️ [INDEX] No data with proxy, retrying without proxies: %s", ticker
             )
             try:
                 session2 = self._create_http_session(ua)
@@ -365,7 +365,7 @@ class YFinanceFetchMixin:
                 ticker_obj = ticker_obj2
             except Exception as exc:
                 self.logger.warning(
-                    "❌ [INDEX] Proxiesiz deneme başarısız: %s", str(exc)[:100]
+                    "❌ [INDEX] Proxyless attempt failed: %s", str(exc)[:100]
                 )
 
         if not info and not fast_info:
@@ -574,7 +574,7 @@ class YFinanceFetchMixin:
                 ticker_obj = ticker_obj2
             except Exception as exc:
                 self.logger.warning(
-                    "❌ [OVERVIEW] Proxiesiz deneme başarısız: %s", str(exc)[:100]
+                    "❌ [OVERVIEW] Proxyless attempt failed: %s", str(exc)[:100]
                 )
 
         if not info and not fast_info:
@@ -720,11 +720,11 @@ class YFinanceFetchMixin:
                 fast_info = self._safe_get_fast_info(ticker_obj)
             except Exception as exc:
                 self.logger.warning(
-                    "❌ [FETCH] Proxiesiz deneme başarısız: %s", str(exc)[:100]
+                    "❌ [FETCH] Proxyless attempt failed: %s", str(exc)[:100]
                 )
 
         if not info and not fast_info:
-            self.logger.warning("yfinance bilgi döndürmedi: %s", ticker)
+            self.logger.warning("yfinance returned no data: %s", ticker)
             return None
 
         summary_profile = (
@@ -762,7 +762,7 @@ class YFinanceFetchMixin:
             or "Unknown",
             "longBusinessSummary": info.get("longBusinessSummary")
             or summary_profile.get("longBusinessSummary")
-            or "Şirket özeti mevcut değil.",
+            or "Company summary not available.",
             "country": info.get("country")
             or summary_profile.get("country")
             or NA_VALUE,
@@ -1043,12 +1043,12 @@ class YFinanceFetchMixin:
                             data["rsi"] = float(rsi)
             except Exception as indicator_exc:
                 self.logger.debug(
-                    "Teknik gösterge hesaplaması başarısız (%s): %s",
+                    "Technical indicator calculation failed (%s): %s",
                     ticker,
                     indicator_exc,
                 )
         except Exception as exc:
-            self.logger.debug("Fiyat geçmişi alınamadı (%s): %s", ticker, exc)
+            self.logger.debug("Price history could not be retrieved (%s): %s", ticker, exc)
 
         statements = self._build_financial_statement_snapshot(ticker_obj)
         if statements:
@@ -1125,7 +1125,7 @@ class YFinanceFetchMixin:
                             data["pegRatio"] = calculated_peg
                 except Exception as peg_exc:
                     self.logger.debug(
-                        "PEG hesaplaması başarısız (%s): %s", ticker, peg_exc
+                        "PEG calculation failed (%s): %s", ticker, peg_exc
                     )
 
         earnings_estimate = self._build_earnings_estimate_snapshot(ticker_obj)
@@ -1318,7 +1318,7 @@ class YFinanceFetchMixin:
 
             return summary
         except Exception as exc:
-            self.logger.debug("Opsiyon özeti oluşturulamadı: %s", exc)
+            self.logger.debug("Options summary could not be created: %s", exc)
             return {}
 
     def _build_funds_snapshot_lite(self, ticker: yf.Ticker) -> Dict[str, Any]:
@@ -1342,7 +1342,7 @@ class YFinanceFetchMixin:
 
             return {k: v for k, v in cleaned.items() if v not in (None, "", [], {})}
         except Exception as exc:
-            self.logger.debug("Fon özeti oluşturulamadı: %s", exc)
+            self.logger.debug("Fund summary could not be created: %s", exc)
             return {}
 
     def _prune_low_signal_fields(self, data: Dict[str, Any]) -> None:

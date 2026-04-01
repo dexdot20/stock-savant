@@ -184,7 +184,7 @@ def _summarize_insider_transactions(
         if transaction_count > 10:
             analysis_notes.append("High insider activity")
         elif transaction_count > 5:
-            analysis_notes.append("Orta seviye insider aktivitesi")
+            analysis_notes.append("Moderate insider activity")
         else:
             analysis_notes.append("Low insider activity")
 
@@ -202,14 +202,14 @@ def _summarize_insider_transactions(
             analysis_notes.append("Weighted insider signal negative")
         else:
             net_sentiment = "NEUTRAL"
-            analysis_notes.append("Ağırlıklı insider sinyali nötr")
+            analysis_notes.append("Weighted insider signal neutral")
 
         if acquisitions and dispositions:
-            analysis_notes.append(f"Alış/Satış oranı: {acquisitions}/{dispositions}")
+            analysis_notes.append(f"Buy/Sell ratio: {acquisitions}/{dispositions}")
         elif acquisitions:
-            analysis_notes.append("Tüm işlemler alış yönlü")
+            analysis_notes.append("All transactions are buy-side")
         elif dispositions:
-            analysis_notes.append("Tüm işlemler satış yönlü")
+            analysis_notes.append("All transactions are sell-side")
 
         return {
             "insider_trading_analysis": {
@@ -231,7 +231,7 @@ def _summarize_insider_transactions(
 
     except Exception as exc:
         if logger:
-            logger.error("Insider trading veri işleme hatası: %s", exc, exc_info=True)
+            logger.error("Insider trading data processing error: %s", exc, exc_info=True)
         return {
             "insider_trading_analysis": {
                 "total_transactions": 0,
@@ -241,7 +241,7 @@ def _summarize_insider_transactions(
                 "latest_transaction": None,
                 "transaction_types": {},
                 "owner_types": {},
-                "analysis_notes": [f"Veri işleme hatası: {exc}"],
+                "analysis_notes": [f"Data processing error: {exc}"],
                 "data_quality": "ERROR",
                 "weighted_signal_score": 50,
                 "normalized_signal": 0.0,
@@ -270,7 +270,7 @@ class YFinanceInsiderMixin:
                     name="ticker.insider_transactions",
                 )
         except Exception as exc:
-            self.logger.debug("İçeriden öğrenen işlemleri alınamadı: %s", exc)
+            self.logger.debug("Insider transactions could not be retrieved: %s", exc)
             df = None
 
         frame = self._ensure_dataframe(df)
@@ -368,7 +368,7 @@ class YFinanceInsiderMixin:
                     if (datetime.now() - last_date).days > 60:
                         is_stale = True
                         self.logger.debug(
-                            "İçeriden öğrenen verisi güncel değil (stale), ek kaynaklar taranıyor."
+                            "Insider data is stale, trying additional sources."
                         )
             except Exception as e:
                 self.logger.debug(f"Stale check failed: {e}")
@@ -413,7 +413,7 @@ class YFinanceInsiderMixin:
                                 all_transactions.append(item)
 
             except Exception as exc:
-                self.logger.debug("İçeriden öğrenen alımları alınamadı: %s", exc)
+                self.logger.debug("Insider purchases could not be retrieved: %s", exc)
 
         if not all_transactions:
             return {}
@@ -495,7 +495,7 @@ class YFinanceHoldersMixin:
                     name=f"ticker.{property_name}",
                 )
             except Exception as exc:
-                self.logger.debug("%s verisi alınamadı: %s", property_name, exc)
+                self.logger.debug("%s data could not be retrieved: %s", property_name, exc)
                 result = None
 
             if property_name == "institutional_holders" and result is not None:
@@ -512,7 +512,7 @@ class YFinanceHoldersMixin:
                 lambda: ticker.major_holders, name="ticker.major_holders"
             )
         except Exception as exc:
-            self.logger.debug("major_holders alınamadı: %s", exc)
+            self.logger.debug("major_holders could not be retrieved: %s", exc)
 
         if major_raw is not None:
             major_df = self._ensure_dataframe(major_raw)
@@ -528,7 +528,7 @@ class YFinanceHoldersMixin:
                     if major_list:
                         snapshot["majorHolders"] = major_list
                 except Exception as exc:
-                    self.logger.debug("majorHolders parsing hatası: %s", exc)
+                    self.logger.debug("majorHolders parsing error: %s", exc)
 
         institutional = fetch("institutional_holders", limit=10)
         if institutional:
@@ -610,7 +610,7 @@ class YFinanceHoldersMixin:
                     lambda: ticker.get_shares_full(), name="ticker.get_shares_full()"
                 )
         except Exception as exc:
-            self.logger.debug("Shares full verisi alınamadı: %s", exc)
+            self.logger.debug("Shares full data could not be retrieved: %s", exc)
             return {}
 
         df = self._ensure_dataframe(shares_raw)
@@ -671,5 +671,5 @@ class YFinanceHoldersMixin:
 
             return snapshot
         except Exception as exc:
-            self.logger.debug("Shares full verisi işlenemedi: %s", exc)
+            self.logger.debug("Shares full data could not be processed: %s", exc)
             return {}

@@ -397,7 +397,7 @@ class PreResearchAgent(ResearchAgentSupportMixin):
             )
             if console:
                 console.print(
-                    f"[dim]📚 Fetch RAG kaydı: {indexed_count} chunk ({strategy})[/dim]"
+                    f"[dim]📚 Fetch RAG record: {indexed_count} chunk ({strategy})[/dim]"
                 )
 
     def _build_skip_fetch_payload(self, url: str) -> Dict[str, Any]:
@@ -503,7 +503,7 @@ class PreResearchAgent(ResearchAgentSupportMixin):
         )
         if warm_hits and console:
             console.print(
-                f"[dim]🧠 Pre-research RAG warm-start: {len(warm_hits)} geçmiş bulgu yüklendi.[/dim]"
+                f"[dim]🧠 Pre-research RAG warm-start: {len(warm_hits)} prior findings loaded.[/dim]"
             )
 
     async def _post_process_fetch_result(
@@ -1822,7 +1822,7 @@ class PreResearchAgent(ResearchAgentSupportMixin):
             )
             if console:
                 console.print(
-                    f"[dim]\U0001f52c URL özeti: {len(prepared_payload):,} \u2192 {len(digest_text):,} karakter[/dim]"
+                    f"[dim]\U0001f52c URL summary: {len(prepared_payload):,} \u2192 {len(digest_text):,} characters[/dim]"
                 )
             return {
                 "url": url,

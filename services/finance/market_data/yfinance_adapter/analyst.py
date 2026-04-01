@@ -57,7 +57,7 @@ class YFinanceAnalystMixin:
                     name="ticker.analyst_price_targets",
                 )
         except Exception as exc:
-            self.logger.debug("Analyst price targets alınamadı: %s", exc)
+            self.logger.debug("Analyst price targets could not be retrieved: %s", exc)
             return {}
 
         if not isinstance(price_targets, dict):
@@ -85,7 +85,7 @@ class YFinanceAnalystMixin:
 
             return {k: v for k, v in snapshot.items() if v not in (None, "", NA_VALUE)}
         except Exception as exc:
-            self.logger.debug("Analyst price targets işlenemedi: %s", exc)
+            self.logger.debug("Analyst price targets could not be processed: %s", exc)
             return {}
 
     def _build_recommendations_snapshot(
@@ -104,7 +104,7 @@ class YFinanceAnalystMixin:
                     lambda: ticker.recommendations, name="ticker.recommendations"
                 )
         except Exception as exc:
-            self.logger.debug("Recommendations alınamadı: %s", exc)
+            self.logger.debug("Recommendations could not be retrieved: %s", exc)
             df = None
 
         frame = self._ensure_dataframe(df)
@@ -132,7 +132,7 @@ class YFinanceAnalystMixin:
                 records.append(record)
             return records
         except Exception as exc:
-            self.logger.debug("Recommendations işlenemedi: %s", exc)
+            self.logger.debug("Recommendations could not be processed: %s", exc)
             return []
 
     def _build_recommendations_summary(self, ticker: yf.Ticker) -> Dict[str, Any]:
@@ -150,7 +150,7 @@ class YFinanceAnalystMixin:
                     name="ticker.recommendations_summary",
                 )
         except Exception as exc:
-            self.logger.debug("Recommendations summary alınamadı: %s", exc)
+            self.logger.debug("Recommendations summary could not be retrieved: %s", exc)
             return {}
 
         if isinstance(summary, dict):
@@ -180,7 +180,7 @@ class YFinanceAnalystMixin:
                     lambda: ticker.growth_estimates, name="ticker.growth_estimates"
                 )
         except Exception as exc:
-            self.logger.debug("Büyüme tahminleri alınamadı: %s", exc)
+            self.logger.debug("Growth estimates could not be retrieved: %s", exc)
             df = None
 
         frame = self._ensure_dataframe(df)
@@ -214,7 +214,7 @@ class YFinanceAnalystMixin:
                 }
             return result
         except Exception as exc:
-            self.logger.debug("Büyüme tahminleri işlenemedi: %s", exc)
+            self.logger.debug("Growth estimates could not be processed: %s", exc)
             return {}
 
     def _build_revenue_estimate_snapshot(self, ticker: yf.Ticker) -> Dict[str, Any]:
@@ -231,7 +231,7 @@ class YFinanceAnalystMixin:
                     lambda: ticker.revenue_estimate, name="ticker.revenue_estimate"
                 )
         except Exception as exc:
-            self.logger.debug("Gelir tahminleri alınamadı: %s", exc)
+            self.logger.debug("Revenue estimates could not be retrieved: %s", exc)
             df = None
 
         frame = self._ensure_dataframe(df)
@@ -255,7 +255,7 @@ class YFinanceAnalystMixin:
                 }
             return result
         except Exception as exc:
-            self.logger.debug("Gelir tahminleri işlenemedi: %s", exc)
+            self.logger.debug("Revenue estimates could not be processed: %s", exc)
             return {}
 
     def _build_earnings_estimate_snapshot(self, ticker: yf.Ticker) -> Dict[str, Any]:
@@ -272,7 +272,7 @@ class YFinanceAnalystMixin:
                     lambda: ticker.earnings_estimate, name="ticker.earnings_estimate"
                 )
         except Exception as exc:
-            self.logger.debug("Kazanç tahminleri alınamadı: %s", exc)
+            self.logger.debug("Earnings estimates could not be retrieved: %s", exc)
             df = None
 
         frame = self._ensure_dataframe(df)
@@ -296,7 +296,7 @@ class YFinanceAnalystMixin:
                 }
             return result
         except Exception as exc:
-            self.logger.debug("Kazanç tahminleri işlenemedi: %s", exc)
+            self.logger.debug("Earnings estimates could not be processed: %s", exc)
             return {}
 
     def _build_upgrades_downgrades_snapshot(
@@ -318,7 +318,7 @@ class YFinanceAnalystMixin:
                     name="ticker.upgrades_downgrades",
                 )
         except Exception as exc:
-            self.logger.debug("Upgrades/Downgrades alınamadı: %s", exc)
+            self.logger.debug("Upgrades/Downgrades could not be retrieved: %s", exc)
             df = None
 
         frame = self._ensure_dataframe(df)
@@ -339,5 +339,5 @@ class YFinanceAnalystMixin:
                 records.append(record)
             return records
         except Exception as exc:
-            self.logger.debug("Upgrades/Downgrades işlenemedi: %s", exc)
+            self.logger.debug("Upgrades/Downgrades could not be processed: %s", exc)
             return []

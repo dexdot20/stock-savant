@@ -341,12 +341,12 @@ class AIOrchestrator:
             _notify(f"🚀 Starting AI workflow: {symbol}")
             _notify(f"📈 Available data: {len(articles)} news articles")
             if user_context:
-                _notify(f"👤 Kullanıcı bağlamı: Mevcut")
+                _notify(f"👤 User context: Present")
             if investment_horizon:
-                _notify(f"⏱️ Yatırım ufku: {investment_horizon}")
+                _notify(f"⏱️ Investment horizon: {investment_horizon}")
 
             self.logger.info(
-                "AI workflow başlıyor - şirket: %s, user_context: %s",
+                "AI workflow starting - company: %s, user_context: %s",
                 symbol,
                 bool(user_context),
             )
@@ -355,14 +355,14 @@ class AIOrchestrator:
             if remaining_time is not None:
                 deadline = time.time() + max(0.0, remaining_time)
                 self.logger.debug("Workflow deadline: %.1fs", remaining_time)
-                _notify(f"⏰ Zaman limiti: {remaining_time:.1f}s")
+                _notify(f"⏰ Time limit: {remaining_time:.1f}s")
 
             def _time_left(min_seconds: float = 1.0) -> Optional[float]:
                 if deadline is None:
                     return None
                 left = deadline - time.time()
                 if left <= 0:
-                    raise APIError("AI workflow zaman aşımı")
+                    raise APIError("AI workflow timeout")
                 return max(left, min_seconds)
 
             news_analysis: Optional[Dict[str, Any]] = None
@@ -371,10 +371,10 @@ class AIOrchestrator:
                 news_analysis = news_analysis_override
                 skip_news_analysis = True
                 self.logger.info(
-                    "Phase 3 - Step 3.1 atlandı: Önceden üretilmiş haber analizi kullanılıyor"
+                    "Phase 3 - Step 3.1 skipped: Using pre-generated news analysis"
                 )
                 _notify(
-                    "✅ [Phase 3.1] Önceden üretilmiş Agentic haber analizi kullanıldı"
+                    "✅ [Phase 3.1] Pre-generated Agentic news analysis used"
                 )
 
             if has_news_permission and not skip_news_analysis:
@@ -386,9 +386,9 @@ class AIOrchestrator:
                 self.logger.info(
                     "Phase 3 - Step 3.1: Haber ve piyasa analizi (%s)", news_display
                 )
-                _notify(f"\n🔍 [Phase 3.1] Haber ve piyasa analizi başlatılıyor...")
+                _notify(f"\n🔍 [Phase 3.1] News and market analysis starting...")
                 _notify(f"🤖 AI Provider: {news_display}")
-                _notify(f"📰 Analiz edilecek haber sayısı: {len(articles)}")
+                _notify(f"📰 Number of articles to analyze: {len(articles)}")
 
                 news_start = time.time()
 
@@ -409,8 +409,8 @@ class AIOrchestrator:
 
                     if "error" in news_analysis:
                         error_msg = news_analysis["error"]
-                        self.logger.error("Haber analizi hatası: %s", error_msg)
-                        raise APIError(f"Haber analizi başarısız: {error_msg}")
+                        self.logger.error("News analysis error: %s", error_msg)
+                        raise APIError(f"News analysis failed: {error_msg}")
 
                     # ══════════════════════════════════════════════════════════════
                     # SUFFICIENCY CHECK - Yeterlilik Kontrolü
@@ -436,10 +436,10 @@ class AIOrchestrator:
                     if confidence_level is None:
                         confidence_level = "Unknown"
 
-                    _notify(f"✅ [Phase 3.1] Haber analizi tamamlandı!")
-                    _notify(f"📝 Analiz uzunluğu: {analysis_length:,} karakter")
-                    _notify(f"🤖 Kullanılan Model: {model_used}")
-                    _notify(f"⏱️ Süre: {news_duration:.2f}s")
+                    _notify(f"✅ [Phase 3.1] News analysis completed!")
+                    _notify(f"📝 Analysis length: {analysis_length:,} characters")
+                    _notify(f"🤖 Model used: {model_used}")
+                    _notify(f"⏱️ Duration: {news_duration:.2f}s")
 
                     # Log working memory stats if available
                     working_memory = news_analysis.get("working_memory")
@@ -448,7 +448,7 @@ class AIOrchestrator:
                         sources_count = len(working_memory.get("sources_consulted", []))
                         facts_count = len(working_memory.get("facts_learned", []))
                         _notify(
-                            f"🧠 Araştırma Derinliği: Skor={depth_score}, Kaynak={sources_count}, Bulgu={facts_count}"
+                            f"🧠 Research Depth: Score={depth_score}, Sources={sources_count}, Findings={facts_count}"
                         )
 
                     # Log usage info if available
@@ -459,11 +459,11 @@ class AIOrchestrator:
                         total_tokens = usage.get("total_tokens", 0)
                         if total_tokens > 0:
                             _notify(
-                                f"🔢 Token Kullanımı: {total_tokens:,} (Giriş: {input_tokens:,}, Çıkış: {output_tokens:,})"
+                                f"🔢 Token Usage: {total_tokens:,} (Input: {input_tokens:,}, Output: {output_tokens:,})"
                             )
 
                     self.logger.info(
-                        "Haber analizi tamamlandı: %s karakter, model: %s, süre: %.2fs",
+                        "News analysis completed: %s characters, model: %s, duration: %.2fs",
                         analysis_length,
                         model_used,
                         news_duration,
@@ -473,19 +473,19 @@ class AIOrchestrator:
                     raise
                 except Exception as exc:
                     self.logger.error(
-                        "Haber analizi beklenmeyen hata: %s",
+                        "News analysis unexpected error: %s",
                         exc,
                         exc_info=True,
                     )
-                    raise APIError(f"Haber analizi hatası: {exc}")
+                    raise APIError(f"News analysis error: {exc}")
 
             elif not skip_news_analysis:
                 self.logger.info(
-                    "Web kazıma izni olmadığı için Phase 3 - Step 3.1 (Haber ve piyasa analizi) atlanıyor",
+                    "Skipping Phase 3 - Step 3.1 (News and market analysis) due to missing web scraping permission",
                 )
 
                 news_analysis = {
-                    "analysis": "Haber analizi kullanıcının web kazıma izni olmadığı için yapılmadı.",
+                    "analysis": "News analysis not performed because user web scraping permission is not available.",
                     "confidence": 0.0,
                     "confidence_level": "very_low",
                     "model_used": "none",
@@ -502,16 +502,16 @@ class AIOrchestrator:
             )
             reasoner_display = self.provider_manager.display_name(reasoner_provider)
             self.logger.info(
-                "Phase 3 - Step 3.2: Yatırım kararı ve risk değerlendirmesi (%s)",
+                "Phase 3 - Step 3.2: Investment decision and risk assessment (%s)",
                 reasoner_display,
             )
 
             _notify(
-                f"\n💡 [Phase 3.2] Yatırım kararı ve risk değerlendirmesi başlatılıyor..."
+                f"\n💡 [Phase 3.2] Investment decision and risk assessment starting..."
             )
             _notify(f"🤖 AI Provider: {reasoner_display}")
             if investment_horizon:
-                _notify(f"⏱️ Yatırım ufku: {investment_horizon}")
+                _notify(f"⏱️ Investment horizon: {investment_horizon}")
 
             reasoner_start = time.time()
 
@@ -536,10 +536,10 @@ class AIOrchestrator:
                 else "Unknown"
             )
 
-            _notify(f"✅ [Phase 3.2] Yatırım kararı tamamlandı!")
-            _notify(f"📝 Karar uzunluğu: {decision_length:,} karakter")
-            _notify(f"🤖 Kullanılan Model: {decision_model}")
-            _notify(f"⏱️ Süre: {reasoner_duration:.2f}s")
+            _notify(f"✅ [Phase 3.2] Investment decision completed!")
+            _notify(f"📝 Decision length: {decision_length:,} characters")
+            _notify(f"🤖 Model used: {decision_model}")
+            _notify(f"⏱️ Duration: {reasoner_duration:.2f}s")
 
             # Log usage info for decision
             if isinstance(decision_response, dict):
@@ -550,7 +550,7 @@ class AIOrchestrator:
                     total_tokens = decision_usage.get("total_tokens", 0)
                     if total_tokens > 0:
                         _notify(
-                            f"🔢 Token Kullanımı: {total_tokens:,} (Giriş: {input_tokens:,}, Çıkış: {output_tokens:,})"
+                            f"🔢 Token usage: {total_tokens:,} (Input: {input_tokens:,}, Output: {output_tokens:,})"
                         )
 
             result = {
@@ -573,7 +573,7 @@ class AIOrchestrator:
             _notify(f"✅ All stages completed successfully")
 
             self.logger.info(
-                "AI workflow başarıyla tamamlandı: %.2fs, %d haber işlendi",
+                "AI workflow completed successfully: %.2fs, %d news processed",
                 workflow_duration,
                 len(articles),
             )
@@ -584,11 +584,11 @@ class AIOrchestrator:
         except APIError:
             raise
         except (ValueError, KeyError, TypeError) as exc:
-            error_msg = f"AI workflow veri işleme hatası: {exc}"
+            error_msg = f"AI workflow data processing error: {exc}"
             self.logger.error(error_msg, exc_info=True)
             return {"error": error_msg}
         except Exception as exc:
-            error_msg = f"AI workflow beklenmeyen hatası: {exc}"
+            error_msg = f"AI workflow unexpected error: {exc}"
             self.logger.error(error_msg, exc_info=True)
             return {"error": error_msg}
 
@@ -634,19 +634,19 @@ class AIOrchestrator:
         if len(analysis_text) < MIN_ANALYSIS_LENGTH:
             is_sufficient = False
             insufficiency_reasons.append(
-                f"Analiz çok kısa ({len(analysis_text)}/{MIN_ANALYSIS_LENGTH} karakter)"
+                f"Analysis too short ({len(analysis_text)}/{MIN_ANALYSIS_LENGTH} characters)"
             )
 
         if depth_score < MIN_DEPTH_SCORE:
             is_sufficient = False
             insufficiency_reasons.append(
-                f"Araştırma derinliği yetersiz (skor: {depth_score}/{MIN_DEPTH_SCORE})"
+                f"Research depth insufficient (score: {depth_score}/{MIN_DEPTH_SCORE})"
             )
 
         if sources_count < MIN_SOURCES:
             is_sufficient = False
             insufficiency_reasons.append(
-                f"Kaynak sayısı yetersiz ({sources_count}/{MIN_SOURCES})"
+                f"Insufficient number of sources ({sources_count}/{MIN_SOURCES})"
             )
 
         if is_sufficient:
@@ -659,17 +659,17 @@ class AIOrchestrator:
         self.logger.warning(
             "Sufficiency check FAILED: %s", "; ".join(insufficiency_reasons)
         )
-        notify_fn(f"\n⚠️ [Yeterlilik Kontrolü] Analiz yetersiz bulundu:")
+        notify_fn(f"\n⚠️ [Sufficiency Check] Analysis deemed insufficient:")
         for reason in insufficiency_reasons:
             notify_fn(f"   ❌ {reason}")
 
         if max_retries <= 0:
             self.logger.info("No retries remaining, returning current analysis")
-            notify_fn("⏭️ Yeniden deneme hakkı kalmadı, mevcut analiz kullanılıyor")
+            notify_fn("⏭️ No retries remaining, using current analysis")
             return news_analysis
 
         notify_fn(
-            f"\n🔄 [Deep Research Mode] Ajan derin araştırma modunda yeniden başlatılıyor..."
+            f"\n🔄 [Deep Research Mode] Agent restarting in deep research mode..."
         )
 
         try:
@@ -687,7 +687,7 @@ class AIOrchestrator:
                     "research_depth_score", 0
                 )
                 notify_fn(
-                    f"✅ Derin araştırma tamamlandı! Yeni uzunluk: {new_length}, Yeni derinlik: {new_depth}"
+                    f"✅ Deep research completed! New length: {new_length}, New depth: {new_depth}"
                 )
 
                 # Recursive check with decremented retries
@@ -704,12 +704,12 @@ class AIOrchestrator:
                 self.logger.error(
                     "Deep research failed: %s", deep_analysis.get("error")
                 )
-                notify_fn(f"❌ Derin araştırma başarısız: {deep_analysis.get('error')}")
+                notify_fn(f"❌ Deep research failed: {deep_analysis.get('error')}")
                 return news_analysis
 
         except Exception as exc:
             self.logger.error("Deep research exception: %s", exc, exc_info=True)
-            notify_fn(f"❌ Derin araştırma hatası: {exc}")
+            notify_fn(f"❌ Deep research error: {exc}")
             return news_analysis
 
     def _display_workflow_results(self, result: Dict[str, Any]) -> None:
@@ -746,4 +746,4 @@ class AIOrchestrator:
                     decision_text[:500],
                 )
         except Exception as exc:  # pragma: no cover
-            self.logger.error("Sonuç gösterme hatası: %s", exc)
+            self.logger.error("Result display error: %s", exc)

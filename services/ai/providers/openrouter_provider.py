@@ -490,7 +490,7 @@ def _prepare_openrouter_payload(
     model = model_override or str(provider_cfg.get("default_model") or "").strip()
     if not model:
         raise APIError(
-            "OpenRouter model is not configured. ai.models.<request_type>.model veya ai.providers.openrouter.default_model alanını ayarlayın."
+            "OpenRouter model is not configured. Set ai.models.<request_type>.model or ai.providers.openrouter.default_model."
         )
 
     normalized_base_url = base_url.rstrip("/")

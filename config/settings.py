@@ -271,7 +271,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         },
 
         "agent_tool_limits": {
-            "max_parallel_tools": 4,
+            "max_parallel_tools": 3,
         },
 
         # Working-memory thresholds are intentionally explicit because they shape
@@ -352,10 +352,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "models": {
             "news": {
                 "provider": "openrouter",
-                "model": "x-ai/grok-4.1-fast",
+                "model": "minimax/minimax-m2.5",
                 "fallback_models": {
                   "openrouter": [
-                        "minimax/minimax-m2.5",
                         "minimax/minimax-m2.7",
                         "x-ai/grok-4.1-fast",
                     ],
@@ -372,10 +371,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             },
             "pre_research": {
                 "provider": "openrouter",
-                "model": "x-ai/grok-4.1-fast",
+                "model": "minimax/minimax-m2.5",
                 "fallback_models": {
                     "openrouter": [
-                        "minimax/minimax-m2.5",
                         "minimax/minimax-m2.7",
                         "x-ai/grok-4.1-fast",
                     ],

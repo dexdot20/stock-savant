@@ -330,8 +330,8 @@ class KapIntelligenceService:
                         "severity": event.get("severity_label", "medium"),
                         "symbol": event.get("symbol"),
                         "message": (
-                            f"KAP olayı: {event.get('symbol')} | {event.get('disclosure_class')} | "
-                            f"şiddet={event.get('severity_score')} | {event.get('summary') or 'Özet yok'}"
+                            f"KAP event: {event.get('symbol')} | {event.get('disclosure_class')} | "
+                            f"severity={event.get('severity_score')} | {event.get('summary') or 'No summary'}"
                         ),
                         "event": event,
                     }

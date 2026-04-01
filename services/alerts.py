@@ -153,8 +153,8 @@ def evaluate_price_alerts(
                 "severity": "medium",
                 "symbol": symbol,
                 "message": (
-                    f"Fiyat alarmı tetiklendi: {symbol} hedef={target_price:.4f}, "
-                    f"yön={direction}, güncel={current_price:.4f}"
+                    f"Price alert triggered: {symbol} target={target_price:.4f}, "
+                    f"direction={direction}, current={current_price:.4f}"
                 ),
                 "alert_id": alert.get("id"),
             }

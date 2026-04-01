@@ -1315,12 +1315,12 @@ class ComparisonAgent(ResearchAgentSupportMixin):
             )
             if console:
                 console.print(
-                    f"[dim]\U0001f52c URL özeti: {len(prepared_payload):,} \u2192 {len(digest_text):,} karakter[/dim]"
+                    f"[dim]\U0001f52c URL summary: {len(prepared_payload):,} \u2192 {len(digest_text):,} characters[/dim]"
                 )
             return json.dumps({"url": url, "digest": digest_text}, ensure_ascii=False)
         except Exception as exc:
             self.logger.warning(
-                "fetch_url_content digest başarısız, ham içerik kullanılıyor: %s", exc
+                "fetch_url_content digest failed, using raw content: %s", exc
             )
             return fallback_result_str
 

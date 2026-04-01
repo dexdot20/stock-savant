@@ -12,19 +12,19 @@ logger = get_standard_logger(__name__)
 DEFAULT_PLAYBOOKS: Dict[str, Dict[str, Any]] = {
     "balanced": {
         "label": "Balanced",
-        "summary": "Dengeli risk/getiri; kalite, değerleme ve haber akışını birlikte değerlendir.",
+        "summary": "Balanced risk/return; consider quality, valuation and news flow together.",
     },
     "dividend": {
         "label": "Dividend",
-        "summary": "Temettü sürdürülebilirliği, nakit akışı ve savunmacı metriklere öncelik ver.",
+        "summary": "Prioritize dividend sustainability, cash flow and defensive metrics.",
     },
     "growth": {
         "label": "Growth",
-        "summary": "Gelir büyümesi, kârlılık trendi ve ileriye dönük katalistleri öne çıkar.",
+        "summary": "Emphasize revenue growth, profitability trends and forward-looking catalysts.",
     },
     "defensive": {
         "label": "Defensive",
-        "summary": "Volatilite kontrolü, bilanço kalitesi ve risk azaltımını merkeze al.",
+        "summary": "Focus on volatility control, balance sheet quality and risk mitigation.",
     },
 }
 
