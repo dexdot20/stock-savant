@@ -1321,6 +1321,55 @@ class SummarizeUrlContentTool(ToolBase):
         self._coverage_ratio_floor = float(
             pruning_cfg.get("coverage_ratio_floor", 0.18)
         )
+        self._semantic_enabled = bool(pruning_cfg.get("use_embedding_filter", True))
+        self._semantic_weight = max(
+            0.0,
+            min(1.0, float(pruning_cfg.get("embedding_weight", 0.35) or 0.35)),
+        )
+        self._semantic_threshold = float(
+            pruning_cfg.get("semantic_threshold", 0.2) or 0.2
+        )
+        self._context_window_size = max(
+            1,
+            int(pruning_cfg.get("context_window_size", 1) or 1),
+        )
+
+    @staticmethod
+    def _merge_focus_query(
+        focus_query: Optional[str],
+        query_hypothesis: Optional[str],
+    ) -> str:
+        parts: List[str] = []
+        normalized_focus = str(focus_query or "").strip()
+        normalized_hypothesis = str(query_hypothesis or "").strip()
+        if normalized_focus:
+            parts.append(normalized_focus)
+        if normalized_hypothesis and normalized_hypothesis not in parts:
+            parts.append(normalized_hypothesis)
+        return "\n\n".join(parts).strip()
+
+    def _semantic_chunk_scores(
+        self,
+        chunks: List[str],
+        focus_query: str,
+    ) -> List[float]:
+        if not self._semantic_enabled or not chunks or not focus_query:
+            return [0.0 for _ in chunks]
+
+        try:
+            rag = get_rag_service()
+        except Exception as exc:
+            logger.debug("Semantic scoring skipped: %s", exc)
+            return [0.0 for _ in chunks]
+
+        if not getattr(rag, "is_ready", lambda: False)():
+            return [0.0 for _ in chunks]
+
+        try:
+            return rag.semantic_similarity_scores(focus_query, chunks)
+        except Exception as exc:
+            logger.debug("Semantic scoring failed: %s", exc)
+            return [0.0 for _ in chunks]
 
     @staticmethod
     def _normalize_query_terms(value: Optional[str]) -> List[str]:
@@ -1345,6 +1394,7 @@ class SummarizeUrlContentTool(ToolBase):
         total_chunks: int,
         focus_query: Optional[str],
         focus_terms: List[str],
+        semantic_score: float = 0.0,
     ) -> float:
         normalized = str(chunk or "").lower()
         score = 0.0
@@ -1374,6 +1424,11 @@ class SummarizeUrlContentTool(ToolBase):
             if overlap == 0:
                 score -= 0.4
 
+        if semantic_score > 0.0:
+            score += semantic_score * (self._semantic_weight * 4.0)
+            if focus_terms and semantic_score < self._semantic_threshold:
+                score -= 0.5
+
         return score
 
     def _expand_chunk_indices(
@@ -1399,6 +1454,22 @@ class SummarizeUrlContentTool(ToolBase):
                 return sorted(ordered)
 
         distance = 1
+        max_context_distance = max(0, int(self._context_window_size or 0))
+        while len(ordered) < limit and distance <= max_context_distance:
+            added = False
+            for index in sorted(primary_indices):
+                for candidate in (index - distance, index + distance):
+                    if candidate < 0 or candidate >= total_chunks or candidate in seen:
+                        continue
+                    ordered.append(candidate)
+                    seen.add(candidate)
+                    added = True
+                    if len(ordered) >= limit:
+                        return sorted(ordered)
+            if not added:
+                break
+            distance += 1
+
         while len(ordered) < limit:
             added = False
             for index in sorted(primary_indices):
@@ -1424,12 +1495,20 @@ class SummarizeUrlContentTool(ToolBase):
         selection_stats: Dict[str, Any],
     ) -> str:
         coverage_ratio = float(selection_stats.get("coverage_ratio", 0.0)) * 100.0
+        context_window = int(selection_stats.get("context_window_size", 0) or 0)
+        context_expanded = bool(selection_stats.get("context_expanded"))
+        context_line = (
+            f"Context window: +/-{context_window} chunk(s)\n"
+            if context_expanded and context_window > 0
+            else ""
+        )
         return (
             "RAG_PRUNED_CONTENT\n"
             f"Source length: {source_length} chars\n"
             f"Selection mode: {selection_stats.get('mode', 'unknown')}\n"
             f"Selected chunks: {selection_stats.get('selected_chunk_count', 0)}/{selection_stats.get('total_chunks', 0)}\n"
-            f"Coverage: {coverage_ratio:.1f}%\n\n{content}"
+            f"Coverage: {coverage_ratio:.1f}%\n"
+            f"{context_line}\n{content}"
         )
 
     def _prune_content(
@@ -1437,8 +1516,10 @@ class SummarizeUrlContentTool(ToolBase):
         *,
         content: str,
         focus_query: Optional[str],
+        query_hypothesis: Optional[str] = None,
     ) -> Dict[str, Any]:
         normalized_content = str(content or "").strip()
+        effective_focus_query = self._merge_focus_query(focus_query, query_hypothesis)
         if not normalized_content:
             return {
                 "content": "",
@@ -1449,7 +1530,9 @@ class SummarizeUrlContentTool(ToolBase):
                     "selected_chunk_count": 0,
                     "selected_chars": 0,
                     "coverage_ratio": 0.0,
-                    "focus_query": str(focus_query or "").strip(),
+                    "focus_query": effective_focus_query,
+                    "context_expanded": False,
+                    "context_window_size": self._context_window_size,
                 },
             }
 
@@ -1463,7 +1546,9 @@ class SummarizeUrlContentTool(ToolBase):
                     "selected_chunk_count": 1,
                     "selected_chars": len(normalized_content),
                     "coverage_ratio": 1.0,
-                    "focus_query": str(focus_query or "").strip(),
+                    "focus_query": effective_focus_query,
+                    "context_expanded": False,
+                    "context_window_size": self._context_window_size,
                 },
             }
 
@@ -1475,20 +1560,23 @@ class SummarizeUrlContentTool(ToolBase):
         if not chunks:
             chunks = [normalized_content]
 
-        stripped_focus_query = str(focus_query or "").strip()
+        stripped_focus_query = effective_focus_query
         focus_terms = self._normalize_query_terms(stripped_focus_query)
+        semantic_scores = self._semantic_chunk_scores(chunks, stripped_focus_query)
 
         scored_chunks: List[Dict[str, Any]] = []
         for index, chunk in enumerate(chunks):
             scored_chunks.append(
                 {
                     "index": index,
+                    "semantic_score": float(semantic_scores[index]) if index < len(semantic_scores) else 0.0,
                     "score": self._score_chunk(
                         chunk,
                         index,
                         len(chunks),
                         stripped_focus_query,
                         focus_terms,
+                        float(semantic_scores[index]) if index < len(semantic_scores) else 0.0,
                     ),
                 }
             )
@@ -1505,6 +1593,9 @@ class SummarizeUrlContentTool(ToolBase):
         selected_indices = self._expand_chunk_indices(primary_indices, len(chunks))
         selected_text = "\n\n".join(chunks[index] for index in selected_indices).strip()
         top_score = float(primary[0].get("score", 0.0)) if primary else 0.0
+        top_semantic_score = (
+            float(primary[0].get("semantic_score", 0.0)) if primary else 0.0
+        )
         coverage_ratio = len(selected_text) / max(1, len(normalized_content))
 
         needs_fallback = (
@@ -1553,17 +1644,31 @@ class SummarizeUrlContentTool(ToolBase):
                 "coverage_ratio": round(coverage_ratio, 4),
                 "focus_query": stripped_focus_query,
                 "top_score": round(top_score, 4),
+                "top_semantic_score": round(top_semantic_score, 4),
+                "primary_chunk_count": len(primary_indices),
+                "context_expanded": selected_indices != primary_indices,
+                "context_window_size": self._context_window_size,
             },
         }
 
-    async def execute(self, url: str, focus_query: Optional[str] = None) -> Dict:
+    async def execute(
+        self,
+        url: str,
+        focus_query: Optional[str] = None,
+        query_hypothesis: Optional[str] = None,
+    ) -> Dict:
         try:
             res = await self.extractor.extract_article_content_async(url)
             if not res or not res.get("content"):
                 return {"error": "Failed to fetch content or content empty"}
 
             content = res["content"]
-            cache_key = ("rag_pruned_v1", url, (focus_query or "").strip())
+            cache_key = (
+                "rag_pruned_v2",
+                url,
+                (focus_query or "").strip(),
+                (query_hypothesis or "").strip(),
+            )
 
             async with _summary_cache_lock:
                 cached_summary = _cache_manager.get("tools_summary", cache_key)
@@ -1574,6 +1679,7 @@ class SummarizeUrlContentTool(ToolBase):
                 pruned_payload = self._prune_content(
                     content=content,
                     focus_query=focus_query,
+                    query_hypothesis=query_hypothesis,
                 )
 
             pruned_text = str((pruned_payload or {}).get("content") or "").strip()

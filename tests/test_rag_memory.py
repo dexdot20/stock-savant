@@ -133,6 +133,49 @@ class RAGMemoryEmbeddingProtocolTests(unittest.TestCase):
         self.assertEqual(len(query_vectors), 1)
         self.assertNotEqual(document_vectors, query_vectors)
 
+    def test_semantic_similarity_scores_uses_embedding_vectors(self) -> None:
+        class _FakeEmbeddingFunction:
+            def encode(self, texts, *, kind):
+                captured = list(texts)
+                if kind == "query":
+                    return [[1.0, 0.0] for _ in captured]
+                mapping = {
+                    "strong": [1.0, 0.0],
+                    "weak": [0.0, 1.0],
+                }
+                return [mapping.get(text, [0.5, 0.5]) for text in captured]
+
+        rag = RAGMemory.__new__(RAGMemory)
+        rag._embedding_function = _FakeEmbeddingFunction()
+
+        scores = rag.semantic_similarity_scores("query", ["strong", "weak"])
+
+        self.assertEqual(len(scores), 2)
+        self.assertGreater(scores[0], scores[1])
+        self.assertAlmostEqual(scores[0], 1.0)
+
+    def test_has_document_url_checks_collection_lookup(self) -> None:
+        class _FakeCollection:
+            def __init__(self):
+                self.last_where = None
+
+            def get(self, where=None, limit=None):
+                self.last_where = where
+                _ = limit
+                return {"ids": ["doc-1"]}
+
+        rag = RAGMemory.__new__(RAGMemory)
+        fake_collection = _FakeCollection()
+        rag._collections = {"pre_research": fake_collection}
+
+        exists = rag.has_document_url("pre_research", "https://example.com/report")
+
+        self.assertTrue(exists)
+        self.assertEqual(
+            fake_collection.last_where,
+            {"url": "https://example.com/report"},
+        )
+
 
 class RAGMemoryChunkingTests(unittest.TestCase):
     def test_structured_chunking_preserves_table_and_section_path(self) -> None:
@@ -190,6 +233,45 @@ Revenue improved during the quarter due to export demand.
         self.assertEqual(expanded[0]["metadata"]["matched_chunk_index"], 2)
         self.assertEqual(expanded[0]["matched_chunk_content"], "Matched child excerpt.")
 
+    def test_index_pre_research_adds_symbol_and_url_metadata(self) -> None:
+        rag = RAGMemory.__new__(RAGMemory)
+        rag.is_ready = lambda: True
+        rag.has_document_url = lambda collection_key, url: False
+        rag._clamp_confidence = lambda value, default: value if value is not None else default
+        rag._default_confidence_score = 0.55
+        rag._safe_int = lambda value, default=0: int(value if value is not None else default)
+        rag._doc_group_id = lambda *args: "group-1"
+        rag._to_unix_ts = lambda value: 1234567890
+        rag._pre_research_chunk_size = 1800
+        rag._pre_research_chunk_overlap = 220
+
+        captured = {}
+
+        def _capture(collection_key, markdown_content, metadata, chunk_size, overlap, id_prefix):
+            captured["collection_key"] = collection_key
+            captured["markdown_content"] = markdown_content
+            captured["metadata"] = metadata
+            captured["chunk_size"] = chunk_size
+            captured["overlap"] = overlap
+            captured["id_prefix"] = id_prefix
+            return 2
+
+        rag._index_parent_child_document = _capture
+
+        indexed = rag.index_pre_research(
+            exchange="BIST",
+            markdown_content="Digest body",
+            symbol="SAHOL.IS",
+            url="https://example.com/sahol",
+            doc_type="fetch_digest",
+        )
+
+        self.assertEqual(indexed, 2)
+        self.assertEqual(captured["collection_key"], "pre_research")
+        self.assertEqual(captured["metadata"]["symbol"], "SAHOL.IS")
+        self.assertEqual(captured["metadata"]["url"], "https://example.com/sahol")
+        self.assertEqual(captured["metadata"]["doc_type"], "fetch_digest")
+
 
 class RAGMemoryRerankTests(unittest.TestCase):
     def test_reranker_can_promote_more_relevant_result(self) -> None:
@@ -228,3 +310,45 @@ class RAGMemoryQueryVariantTests(unittest.TestCase):
         self.assertEqual(labels[0], "query")
         self.assertIn("hyde", labels)
         self.assertNotIn("template_hyde", labels)
+
+
+class RAGMemorySearchFilterTests(unittest.TestCase):
+    def test_symbol_filter_applies_to_pre_research_collection(self) -> None:
+        rag = RAGMemory.__new__(RAGMemory)
+        rag.enabled = True
+        rag.top_k = 5
+        rag._candidate_pool = 5
+        rag._rerank_candidate_pool = 5
+        rag._collections = {"pre_research": object()}
+        rag._build_query_variants = lambda query, query_hypothesis=None, query_variants=None: [
+            {"label": "query", "text": query, "weight": 1.0}
+        ]
+        rag._embed_query = lambda query_text: [0.1]
+        captured_where = []
+
+        def _query_collection(collection_key, query, n_results, where=None, query_embedding=None):
+            _ = (collection_key, query, n_results, query_embedding)
+            captured_where.append(where)
+            return [
+                {
+                    "id": "doc-1",
+                    "content": "Digest",
+                    "metadata": {"symbol": "SAHOL.IS", "doc_group_id": "grp-1", "chunk_index": 0},
+                    "distance": 0.1,
+                    "collection": "pre_research",
+                }
+            ]
+
+        rag._query_collection = _query_collection
+        rag._normalize_collection_scores = lambda results: None
+        rag._apply_confidence_weighting = lambda results: None
+        rag._rerank_results = lambda query, results: results
+        rag._expand_with_context_windows = lambda items, context_window: items
+
+        rag.search(
+            "screening query",
+            collection="pre_research",
+            symbol_filter="SAHOL.IS",
+        )
+
+        self.assertEqual(captured_where[0], {"symbol": "SAHOL.IS"})

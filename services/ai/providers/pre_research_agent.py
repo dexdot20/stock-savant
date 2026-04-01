@@ -1,14 +1,14 @@
 import json
 import asyncio
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 
 from rich.console import Console
 
 from config import get_config
 from services.factories import get_rag_service, get_shared_memory_pool
-from services.tools import execute_tool
+from services.tools import SummarizeUrlContentTool, execute_tool
 from services.tools import get_tool_quality_metrics, to_standard_tool_result
 from services.ai.memory_formatter import format_working_memory_evidence_pack
 from services.ai.providers.token_utils import estimate_tokens_for_messages
@@ -16,6 +16,7 @@ from services.ai.providers.memory_rag_utils import (
     derive_spill_confidence,
     derive_spill_data_gap_count,
     format_fact_for_rag,
+    generate_hypothetical_rag_document,
 )
 from services.ai.providers.context_preservation_utils import (
     extract_tool_name_from_tool_result,
@@ -157,6 +158,437 @@ class PreResearchAgent(ResearchAgentSupportMixin):
         self._current_exchange: str = ""
         self._history_archives: List[Dict[str, Any]] = []
         self._tool_journal: List[Dict[str, Any]] = []
+        adaptive_digest_cfg = config.get("ai", {}).get("pre_research", {}).get(
+            "adaptive_digest", {}
+        )
+        self._adaptive_digest_enabled = bool(adaptive_digest_cfg.get("enabled", True))
+        self._adaptive_simple_threshold_chars = _safe_int(
+            adaptive_digest_cfg.get("simple_threshold_chars", 3000), 3000
+        )
+        self._adaptive_complex_threshold_chars = _safe_int(
+            adaptive_digest_cfg.get("complex_threshold_chars", 15000), 15000
+        )
+        self._adaptive_pruned_target_chars = _safe_int(
+            adaptive_digest_cfg.get("pruned_target_chars", 7000), 7000
+        )
+        self._fetch_dedupe_window_hours = max(
+            1,
+            _safe_int(
+                config.get("ai", {})
+                .get("pre_research", {})
+                .get("fetch_dedupe_window_hours", 24),
+                24,
+            ),
+        )
+        self._fetched_urls: Dict[str, str] = {}
+        self._url_pruning_tool = SummarizeUrlContentTool()
+
+    def _prune_recent_fetches(self) -> None:
+        if not self._fetched_urls:
+            return
+
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            hours=self._fetch_dedupe_window_hours
+        )
+        retained: Dict[str, str] = {}
+        for url, raw_timestamp in self._fetched_urls.items():
+            try:
+                fetched_at = datetime.fromisoformat(str(raw_timestamp))
+            except Exception:
+                continue
+            if fetched_at >= cutoff:
+                retained[url] = str(raw_timestamp)
+        self._fetched_urls = retained
+
+    def _is_duplicate_fetch(self, url: str) -> bool:
+        normalized_url = str(url or "").strip()
+        if not normalized_url:
+            return False
+        self._prune_recent_fetches()
+        last_fetch = self._fetched_urls.get(normalized_url)
+        if not last_fetch:
+            return False
+        try:
+            fetched_at = datetime.fromisoformat(last_fetch)
+        except Exception:
+            return False
+        return fetched_at >= (
+            datetime.now(timezone.utc)
+            - timedelta(hours=self._fetch_dedupe_window_hours)
+        )
+
+    def _mark_url_fetched(self, url: str) -> None:
+        normalized_url = str(url or "").strip()
+        if not normalized_url:
+            return
+        self._prune_recent_fetches()
+        self._fetched_urls[normalized_url] = datetime.now(timezone.utc).isoformat()
+
+    def _build_fetch_focus_query(self, explicit_focus_query: Optional[str]) -> str:
+        explicit = str(explicit_focus_query or "").strip()
+        if explicit:
+            return explicit
+
+        questions = self.memory.to_dict().get("unanswered_questions", [])
+        normalized = [str(item).strip() for item in questions if str(item).strip()]
+        if normalized:
+            return "\n".join(normalized[:8])
+
+        if self._current_exchange:
+            return (
+                f"{self._current_exchange} market catalysts, risks, financial metrics, "
+                "disclosures"
+            )
+        return "key financial metrics, catalysts, risks, disclosures"
+
+    async def _generate_fetch_query_hypothesis(self, focus_query: str) -> str:
+        normalized_focus = str(focus_query or "").strip()
+        if not normalized_focus:
+            return ""
+
+        try:
+            return await generate_hypothetical_rag_document(
+                normalized_focus,
+                request_executor=self._request_executor,
+                language=self._output_lang,
+                timeout_seconds=10.0,
+                max_chars=500,
+            )
+        except Exception as exc:
+            self.logger.debug("Fetch HyDE hypothesis skipped: %s", exc)
+            return ""
+
+    def _estimate_fetch_complexity(
+        self,
+        raw_result: Dict[str, Any],
+        focus_query: str,
+    ) -> str:
+        content = str(raw_result.get("content") or "")
+        content_length = len(content)
+        heading_count = len(
+            re.findall(r"(^|\n)(#{1,6}\s|[A-Z][^\n]{0,80}:)", content)
+        )
+        numeric_hits = len(
+            re.findall(r"\b\d[\d,.:/%$EURTRYTLMBKmbk-]*\b", content)
+        )
+        question_count = len(self.memory.to_dict().get("unanswered_questions", []))
+
+        complexity_score = 0
+        if content_length >= self._adaptive_complex_threshold_chars:
+            complexity_score += 3
+        elif content_length <= self._adaptive_simple_threshold_chars:
+            complexity_score -= 1
+        else:
+            complexity_score += 1
+        if heading_count >= 8:
+            complexity_score += 1
+        if numeric_hits >= 80:
+            complexity_score += 1
+        if question_count >= 5:
+            complexity_score += 1
+        if len(str(focus_query or "").strip()) >= 160:
+            complexity_score += 1
+
+        if complexity_score <= 0:
+            return "simple"
+        if complexity_score >= 4:
+            return "complex"
+        return "moderate"
+
+    def _detect_fetch_symbol(self, payload: Dict[str, Any]) -> Optional[str]:
+        memory_state = self.memory.to_dict()
+        candidates: List[str] = []
+        for key in ("symbol", "ticker"):
+            value = memory_state.get(key)
+            if value:
+                candidates.append(str(value))
+        for source in memory_state.get("sources_consulted", []):
+            source_str = str(source or "").strip()
+            if source_str:
+                candidates.append(source_str)
+        title = str(payload.get("title") or payload.get("headline") or "").strip()
+        if title:
+            candidates.append(title)
+
+        for candidate in candidates:
+            normalized = str(candidate).strip().upper()
+            if not normalized:
+                continue
+            bist_match = re.search(r"\b([A-Z]{2,10})\.IS\b", normalized)
+            if bist_match:
+                return f"{bist_match.group(1)}.IS"
+            us_match = re.search(r"\b([A-Z]{2,5})\b", normalized)
+            if us_match and us_match.group(1) not in {"HTTP", "HTTPS", "BIST"}:
+                return us_match.group(1)
+        return None
+
+    def _build_fetch_index_content(
+        self,
+        payload: Dict[str, Any],
+        strategy: str,
+        focus_query: str,
+    ) -> str:
+        if payload.get("index_content"):
+            base = str(payload.get("index_content") or "").strip()
+        elif payload.get("digest"):
+            base = str(payload.get("digest") or "").strip()
+        else:
+            base = str(payload.get("content") or "").strip()
+        if not base:
+            return ""
+
+        questions = [
+            str(item).strip()
+            for item in self.memory.to_dict().get("unanswered_questions", [])
+            if str(item).strip()
+        ]
+        parts = [
+            f"Fetch strategy: {strategy}",
+            f"Exchange: {self._current_exchange or 'UNKNOWN'}",
+        ]
+        if focus_query:
+            parts.append(f"Focus query: {focus_query}")
+        if questions:
+            parts.append("Open questions:\n" + "\n".join(f"- {item}" for item in questions[:8]))
+        parts.append(base)
+        return "\n\n".join(part for part in parts if part).strip()
+
+    async def _index_fetch_result_to_rag(
+        self,
+        *,
+        url: str,
+        payload: Dict[str, Any],
+        strategy: str,
+        focus_query: str,
+        console: Optional[Console],
+    ) -> None:
+        normalized_url = str(url or "").strip()
+        if not normalized_url:
+            return
+
+        index_content = self._build_fetch_index_content(payload, strategy, focus_query)
+        if not index_content:
+            return
+
+        try:
+            rag = get_rag_service()
+        except Exception as exc:
+            self.logger.debug("Fetch RAG indexing skipped: %s", exc)
+            return
+
+        if not rag.is_ready() or rag.has_document_url("pre_research", normalized_url):
+            return
+
+        indexed_count = rag.index_pre_research(
+            exchange=self._current_exchange or "UNKNOWN",
+            markdown_content=index_content,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            confidence_score=0.62 if strategy == "llm_digest" else 0.56,
+            symbol=self._detect_fetch_symbol(payload),
+            url=normalized_url,
+            doc_type="fetch_digest",
+        )
+        if indexed_count > 0:
+            self.logger.info(
+                "Fetch result indexed into RAG via %s: %s (%d chunks)",
+                strategy,
+                normalized_url,
+                indexed_count,
+            )
+            if console:
+                console.print(
+                    f"[dim]📚 Fetch RAG kaydı: {indexed_count} chunk ({strategy})[/dim]"
+                )
+
+    def _build_skip_fetch_payload(self, url: str) -> Dict[str, Any]:
+        return {
+            "url": str(url or "").strip(),
+            "content": "",
+            "is_summarized": True,
+            "is_retrieval_pruned": False,
+            "skip_reason": "duplicate_fetch",
+            "digest_strategy": "dedupe_skip",
+        }
+
+    def _apply_rag_pruning_to_fetch_result(
+        self,
+        *,
+        raw_result: Dict[str, Any],
+        url: str,
+        focus_query: str,
+        query_hypothesis: str,
+    ) -> Dict[str, Any]:
+        content = str(raw_result.get("content") or "").strip()
+        if not content:
+            return dict(raw_result)
+
+        pruned_payload = self._url_pruning_tool._prune_content(
+            content=content,
+            focus_query=focus_query,
+            query_hypothesis=query_hypothesis or None,
+        )
+        pruned_text = str((pruned_payload or {}).get("content") or "").strip()
+        if not pruned_text:
+            return dict(raw_result)
+
+        selection_stats = (
+            (pruned_payload or {}).get("selection_stats")
+            if isinstance((pruned_payload or {}).get("selection_stats"), dict)
+            else {}
+        )
+        payload = dict(raw_result)
+        payload["content"] = self._url_pruning_tool._format_pruned_content(
+            content=pruned_text,
+            source_length=len(content),
+            selection_stats=selection_stats,
+        )
+        payload["index_content"] = str(
+            (pruned_payload or {}).get("index_content") or pruned_text
+        ).strip()
+        payload["url"] = str(url or payload.get("url") or "")
+        payload["is_summarized"] = True
+        payload["is_retrieval_pruned"] = True
+        payload["selection_mode"] = selection_stats.get("mode")
+        payload["selection_stats"] = selection_stats
+        payload["digest_strategy"] = "rag_pruned"
+        return payload
+
+    async def _bootstrap_memory_from_rag(
+        self,
+        *,
+        exchange: str,
+        criteria: Optional[str],
+        console: Optional[Console],
+    ) -> None:
+        try:
+            rag = get_rag_service()
+        except Exception as exc:
+            self.logger.debug("Pre-research RAG warm-start skipped: %s", exc)
+            return
+
+        if not rag.is_ready():
+            return
+
+        base_query = " ".join(
+            part
+            for part in [exchange, criteria or "", "market screening news disclosures analysis"]
+            if str(part).strip()
+        ).strip()
+        if not base_query:
+            return
+
+        hypothesis = ""
+        rag_cfg = self._config.get("ai", {}).get("rag", {})
+        if bool((rag_cfg.get("query_expansion", {}) or {}).get("enabled", True)):
+            hypothesis = await self._generate_fetch_query_hypothesis(base_query)
+
+        working_memory_cfg = self._config.get("ai", {}).get("working_memory", {})
+        warm_hits = self.memory.refresh_context(
+            base_query,
+            rag_service=rag,
+            top_k=_safe_int(working_memory_cfg.get("refresh_context_top_k", 5), 5),
+            recent_days=_safe_int(
+                working_memory_cfg.get("refresh_context_recent_days", 30),
+                30,
+            ),
+            context_window=_safe_int(
+                working_memory_cfg.get("refresh_context_window", 1),
+                1,
+            ),
+            importance=6,
+            tags=["rag_retrieved", "prior_news", "prior_pre_research"],
+            preview_chars=700,
+            milestone="RAG warm-start completed at pre-research start",
+            query_hypothesis=hypothesis or None,
+        )
+        if warm_hits and console:
+            console.print(
+                f"[dim]🧠 Pre-research RAG warm-start: {len(warm_hits)} geçmiş bulgu yüklendi.[/dim]"
+            )
+
+    async def _post_process_fetch_result(
+        self,
+        *,
+        args: Dict[str, Any],
+        raw_result: Dict[str, Any],
+        console: Optional[Console],
+    ) -> Dict[str, Any]:
+        url = str(args.get("url") or raw_result.get("url") or "").strip()
+        focus_query = self._build_fetch_focus_query(args.get("focus_query"))
+        strategy_mode = "complex"
+        hypothesis = ""
+        if not self._adaptive_digest_enabled:
+            payload = await self._fetch_url_with_digest(
+                url=url,
+                raw_result=raw_result,
+                fallback_result_str=raw_result,
+                console=console,
+            )
+            await self._index_fetch_result_to_rag(
+                url=url,
+                payload=payload,
+                strategy=str(payload.get("digest_strategy") or "llm_digest"),
+                focus_query=focus_query,
+                console=console,
+            )
+            if console:
+                console.print(
+                    f"[dim]🧭 Fetch strategy: {payload.get('digest_strategy', 'llm_digest')}[/dim]"
+                )
+            return payload
+
+        strategy_mode = self._estimate_fetch_complexity(raw_result, focus_query)
+        if strategy_mode != "simple":
+            hypothesis = await self._generate_fetch_query_hypothesis(focus_query)
+        payload = dict(raw_result)
+
+        if strategy_mode in {"moderate", "complex"}:
+            payload = self._apply_rag_pruning_to_fetch_result(
+                raw_result=raw_result,
+                url=url,
+                focus_query=focus_query,
+                query_hypothesis=hypothesis,
+            )
+
+        if self._adaptive_digest_enabled and strategy_mode == "complex":
+            selection_stats = (
+                payload.get("selection_stats") if isinstance(payload.get("selection_stats"), dict) else {}
+            )
+            selected_chars = int(
+                selection_stats.get("selected_chars", len(str(payload.get("content") or "")))
+                or 0
+            )
+            if selected_chars > self._adaptive_pruned_target_chars:
+                payload = await self._fetch_url_with_digest(
+                    url=url,
+                    raw_result=raw_result,
+                    fallback_result_str=payload,
+                    console=console,
+                )
+            else:
+                payload["digest_strategy"] = str(
+                    payload.get("digest_strategy") or "rag_pruned"
+                )
+        elif self._adaptive_digest_enabled and strategy_mode == "simple":
+            payload["digest_strategy"] = "raw"
+            payload["url"] = url
+        else:
+            payload["digest_strategy"] = str(
+                payload.get("digest_strategy") or "rag_pruned"
+            )
+
+        await self._index_fetch_result_to_rag(
+            url=url,
+            payload=payload,
+            strategy=str(payload.get("digest_strategy") or "raw"),
+            focus_query=focus_query,
+            console=console,
+        )
+        if console:
+            console.print(
+                f"[dim]🧭 Fetch strategy: {payload.get('digest_strategy', strategy_mode)}[/dim]"
+            )
+        return payload
 
     def _build_partial_report(self) -> str:
         partial_report = (
@@ -530,6 +962,12 @@ class PreResearchAgent(ResearchAgentSupportMixin):
             self._history_archives = []
             self._tool_journal = []
             step = 0
+
+        await self._bootstrap_memory_from_rag(
+            exchange=self._current_exchange or exchange,
+            criteria=criteria,
+            console=console,
+        )
 
         today = datetime.now().strftime("%d %B %Y")
         try:
@@ -1329,7 +1767,7 @@ class PreResearchAgent(ResearchAgentSupportMixin):
         raw_result: Any,
         fallback_result_str: str,
         console: Optional[Console] = None,
-    ) -> str:
+    ) -> Dict[str, Any]:
         """
         Filter fetch_url_content (raw content) output through mini-model (summarizer).
         Extract only parts of the page that answer open questions in working memory.
@@ -1357,6 +1795,11 @@ class PreResearchAgent(ResearchAgentSupportMixin):
             f"Fetched page content:\n{prepared_payload}\n\n"
             "Extracted relevant information:"
         )
+        fallback_payload = (
+            dict(fallback_result_str)
+            if isinstance(fallback_result_str, dict)
+            else dict(raw_result if isinstance(raw_result, dict) else {})
+        )
         try:
             digest_response = await self._request_executor.send_async(
                 [
@@ -1368,7 +1811,10 @@ class PreResearchAgent(ResearchAgentSupportMixin):
             )
             digest_text = (digest_response.get("content") or "").strip()
             if not digest_text:
-                return fallback_result_str
+                fallback_payload["digest_strategy"] = str(
+                    fallback_payload.get("digest_strategy") or "raw_fallback"
+                )
+                return fallback_payload
             self.logger.info(
                 "fetch_url_content digest: %d \u2192 %d karakter",
                 len(prepared_payload),
@@ -1378,12 +1824,22 @@ class PreResearchAgent(ResearchAgentSupportMixin):
                 console.print(
                     f"[dim]\U0001f52c URL özeti: {len(prepared_payload):,} \u2192 {len(digest_text):,} karakter[/dim]"
                 )
-            return json.dumps({"url": url, "digest": digest_text}, ensure_ascii=False)
+            return {
+                "url": url,
+                "digest": digest_text,
+                "is_summarized": True,
+                "is_retrieval_pruned": False,
+                "digest_strategy": "llm_digest",
+                "source_length": len(prepared_payload),
+            }
         except Exception as exc:
             self.logger.warning(
                 "fetch_url_content digest failed, using raw content: %s", exc
             )
-            return fallback_result_str
+            fallback_payload["digest_strategy"] = str(
+                fallback_payload.get("digest_strategy") or "raw_fallback"
+            )
+            return fallback_payload
 
     async def _execute_tool_safe(
         self, tool_name: str, args: Dict[str, Any], console: Optional[Console] = None
@@ -1398,22 +1854,33 @@ class PreResearchAgent(ResearchAgentSupportMixin):
                     }
                 )
 
+            if tool_name == "fetch_url_content":
+                normalized_url = str(args.get("url") or "").strip()
+                if self._is_duplicate_fetch(normalized_url):
+                    return json.dumps(
+                        self._build_skip_fetch_payload(normalized_url),
+                        ensure_ascii=False,
+                        default=str,
+                    )
+
             result = await execute_tool(tool_name, args=args, console=console)
-
-            standardized_result = to_standard_tool_result(tool_name, result)
-            result_str = json.dumps(standardized_result, ensure_ascii=False, default=str)
-
-            # fetch_url_content (raw content) → compress with agent digest filter.
-            # summarize_url_content already returns a retrieval-pruned subset — no additional digest needed.
             if tool_name == "fetch_url_content" and not (
                 isinstance(result, dict) and result.get("error")
             ):
-                result_str = await self._fetch_url_with_digest(
-                    url=args.get("url", ""),
+                self._mark_url_fetched(str(args.get("url") or "").strip())
+
+            standardized_result = to_standard_tool_result(tool_name, result)
+            if tool_name == "fetch_url_content" and not (
+                isinstance(result, dict) and result.get("error")
+            ):
+                payload = await self._post_process_fetch_result(
+                    args=args,
                     raw_result=standardized_result,
-                    fallback_result_str=result_str,
                     console=console,
                 )
+                return json.dumps(payload, ensure_ascii=False, default=str)
+
+            result_str = json.dumps(standardized_result, ensure_ascii=False, default=str)
 
             return result_str
         except Exception as exc:

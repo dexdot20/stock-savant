@@ -979,6 +979,58 @@ class RAGMemory:
             return None
         return vectors[0]
 
+    def semantic_similarity_scores(
+        self,
+        query_text: str,
+        documents: Sequence[str],
+    ) -> List[float]:
+        if not self._embedding_function:
+            return [0.0 for _ in documents]
+
+        normalized_query = str(query_text or "").strip()
+        normalized_docs = [str(doc or "").strip() for doc in documents]
+        if not normalized_query or not normalized_docs:
+            return [0.0 for _ in normalized_docs]
+
+        query_vector = self._embed_query(normalized_query)
+        if not query_vector:
+            return [0.0 for _ in normalized_docs]
+
+        doc_vectors = self._embedding_function.encode(normalized_docs, kind="document")
+        scores: List[float] = []
+        for vector in doc_vectors:
+            if not vector:
+                scores.append(0.0)
+                continue
+            dot = sum(float(a) * float(b) for a, b in zip(query_vector, vector))
+            query_norm = sum(float(value) * float(value) for value in query_vector) ** 0.5
+            vector_norm = sum(float(value) * float(value) for value in vector) ** 0.5
+            if query_norm <= 0.0 or vector_norm <= 0.0:
+                scores.append(0.0)
+                continue
+            scores.append(max(-1.0, min(1.0, dot / (query_norm * vector_norm))))
+
+        return scores
+
+    def has_document_url(self, collection_key: str, url: str) -> bool:
+        if collection_key not in self._collections:
+            return False
+
+        normalized_url = str(url or "").strip()
+        if not normalized_url:
+            return False
+
+        try:
+            existing = self._collections[collection_key].get(
+                where={"url": normalized_url},
+                limit=1,
+            )
+        except Exception as exc:
+            logger.debug("URL lookup failed in %s for %s: %s", collection_key, normalized_url, exc)
+            return False
+
+        return bool((existing or {}).get("ids"))
+
     def _build_query_variants(
         self,
         query: str,
@@ -1299,8 +1351,15 @@ class RAGMemory:
         timestamp: Optional[str] = None,
         confidence_score: Optional[float] = None,
         data_gaps_count: Optional[int] = None,
+        symbol: Optional[str] = None,
+        url: Optional[str] = None,
+        doc_type: str = "pre_research",
     ) -> int:
         if not self.is_ready() or not markdown_content:
+            return 0
+
+        normalized_url = str(url or "").strip()
+        if normalized_url and self.has_document_url("pre_research", normalized_url):
             return 0
 
         ts = timestamp or datetime.now(timezone.utc).isoformat()
@@ -1309,15 +1368,17 @@ class RAGMemory:
         )
         gap_count = self._safe_int(data_gaps_count, 0)
         group_id = self._doc_group_id(
-            "pre_research", exchange.upper(), ts, "pre_research"
+            "pre_research", normalized_url or exchange.upper(), ts, doc_type
         )
         return self._index_parent_child_document(
             "pre_research",
             markdown_content,
             metadata={
                 "exchange": exchange.upper(),
+                "symbol": (symbol or "").upper(),
+                "url": normalized_url,
                 "timestamp": self._to_unix_ts(ts),
-                "doc_type": "pre_research",
+                "doc_type": str(doc_type or "pre_research").strip() or "pre_research",
                 "confidence_score": confidence,
                 "data_gaps_count": gap_count,
                 "doc_group_id": group_id,
@@ -1738,7 +1799,7 @@ class RAGMemory:
         )
         for collection_key in selected_collections:
             clauses: List[Dict[str, Any]] = []
-            if collection_key != "pre_research" and where:
+            if where:
                 clauses.append(where)
             if time_clause:
                 clauses.append(time_clause)

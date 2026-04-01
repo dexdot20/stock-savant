@@ -1,6 +1,9 @@
+import asyncio
 import logging
 import unittest
 from io import StringIO
+from unittest.mock import AsyncMock, patch
+
 from rich.console import Console
 
 from services.ai.providers.agent_guardrails import (
@@ -543,6 +546,108 @@ class ReasoningUxTests(unittest.TestCase):
 
         output = stream.getvalue()
         self.assertNotIn("Thinking Process", output)
+
+
+class PreResearchAgentAdaptiveFetchTests(unittest.TestCase):
+    def _build_agent(self) -> PreResearchAgent:
+        agent = PreResearchAgent.__new__(PreResearchAgent)
+        agent.logger = logging.getLogger("pre-research-adaptive-test")
+        agent._fetch_dedupe_window_hours = 24
+        agent._fetched_urls = {}
+        agent._adaptive_digest_enabled = True
+        agent._adaptive_simple_threshold_chars = 3000
+        agent._adaptive_complex_threshold_chars = 15000
+        agent._adaptive_pruned_target_chars = 7000
+        agent._current_exchange = "BIST"
+        agent._output_lang = "English"
+        agent._request_executor = AsyncMock()
+        agent._request_executor.send_async = AsyncMock(return_value={"content": ""})
+        agent._config = {"ai": {"rag": {"query_expansion": {"enabled": True}}}}
+        agent.memory = type(
+            "MemoryStub",
+            (),
+            {
+                "to_dict": lambda self: {
+                    "unanswered_questions": ["What are the near-term risks for SAHOL.IS?"],
+                    "sources_consulted": ["SAHOL.IS investor presentation"],
+                },
+                "refresh_context": lambda self, *args, **kwargs: [{"id": "doc-1"}],
+            },
+        )()
+        agent._url_pruning_tool = type(
+            "PrunerStub",
+            (),
+            {
+                "_prune_content": lambda self, **kwargs: {
+                    "content": "Selected chunk",
+                    "index_content": "Selected chunk",
+                    "selection_stats": {
+                        "mode": "query_pruned",
+                        "selected_chars": 14,
+                    },
+                },
+                "_format_pruned_content": lambda self, **kwargs: "RAG_PRUNED_CONTENT\nSelected chunk",
+            },
+        )()
+        agent._index_fetch_result_to_rag = AsyncMock()
+        agent._fetch_url_with_digest = AsyncMock(
+            return_value={"url": "https://example.com", "digest": "LLM digest", "digest_strategy": "llm_digest"}
+        )
+        return agent
+
+    def test_duplicate_fetch_is_detected_within_window(self) -> None:
+        agent = self._build_agent()
+
+        agent._mark_url_fetched("https://example.com")
+
+        self.assertTrue(agent._is_duplicate_fetch("https://example.com"))
+
+    def test_estimate_fetch_complexity_marks_large_structured_content_complex(self) -> None:
+        agent = self._build_agent()
+
+        complexity = agent._estimate_fetch_complexity(
+            {
+                "content": ("# Section\nRevenue 10\n" * 1200),
+            },
+            "Revenue outlook and debt profile",
+        )
+
+        self.assertEqual(complexity, "complex")
+
+    def test_execute_tool_safe_skips_duplicate_fetch_before_tool_call(self) -> None:
+        agent = self._build_agent()
+        agent._update_working_memory = lambda *args, **kwargs: None
+        agent._current_depth_score = lambda: 0
+        agent._mark_url_fetched("https://example.com")
+
+        result = asyncio.run(
+            agent._execute_tool_safe(
+                "fetch_url_content",
+                {"url": "https://example.com"},
+                console=None,
+            )
+        )
+
+        self.assertIn("duplicate_fetch", result)
+        self.assertIn("dedupe_skip", result)
+
+    def test_bootstrap_memory_from_rag_loads_prior_news_context(self) -> None:
+        agent = self._build_agent()
+        rag = type("RAGStub", (), {"is_ready": lambda self: True})()
+
+        with patch(
+            "services.ai.providers.pre_research_agent.get_rag_service",
+            return_value=rag,
+        ):
+            asyncio.run(
+                agent._bootstrap_memory_from_rag(
+                    exchange="BIST",
+                    criteria="banking screen",
+                    console=None,
+                )
+            )
+
+        self.assertTrue(agent._index_fetch_result_to_rag.await_count == 0)
 
 
 if __name__ == "__main__":
